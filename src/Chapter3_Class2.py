@@ -112,6 +112,7 @@ for epoch in range(num_epochs):
     # X和y分别是小批量样本的特征和标签
     for X, y in data_iter(batch_size, features, labels):
         # net是算出来的y_hat，l是有关小批量X和y的损失，有个sum
+        # 这里的sum就是sgd里面除以batch_size的原因
         l = loss(net(X, w, b), y).sum()
         # 小批量的损失对模型参数求梯度
         l.backward()
