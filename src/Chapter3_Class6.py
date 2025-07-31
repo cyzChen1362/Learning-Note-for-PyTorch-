@@ -76,7 +76,7 @@ y_hat = torch.tensor([[0.1, 0.3, 0.6], [0.3, 0.2, 0.5]])
 # 真实的标签分别是第0类和第2类
 y = torch.LongTensor([0, 2])
 
-# y变成1行2列
+# y变成2行1列
 # gather(dim=1, index)：在每一行中按dim=1列检索，根据index的位置取出对应值
 y_hat.gather(1, y.view(-1, 1))
 
@@ -113,6 +113,7 @@ def evaluate_accuracy(data_iter, net):
     for X, y in data_iter:
         # net(X)返回n行10列的softmax结果，y为真实值；
         # 每一个for循环的data_iter是怎么处理的，详见第一部分注释
+        # argmax(dim=1)沿列找出每行最大值，变成n行1列
         acc_sum += (net(X).argmax(dim=1) == y).float().sum().item()
         # 叠加batch数（即真实值标签数）
         n += y.shape[0]
@@ -137,6 +138,8 @@ def train_ch3(net, train_iter, test_iter, loss, num_epochs, batch_size,
             # 模型预测一次y_hat
             y_hat = net(X)
             # 这一批次的所有损失函数之和
+            # 这里的loss是某批次所有损失函数的和
+            # nn.CrossEntropyLoss()得到的loss是批次的平均
             l = loss(y_hat, y).sum()
 
             # 梯度清零
