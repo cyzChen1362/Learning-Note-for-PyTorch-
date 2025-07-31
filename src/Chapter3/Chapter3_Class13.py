@@ -78,6 +78,7 @@ params = [W1, b1, W2, b2, W3, b3]
 
 drop_prob1, drop_prob2 = 0.2, 0.5
 
+# 网络
 def net(X, is_training=True):
     X = X.view(-1, num_inputs)
     H1 = (torch.matmul(X, W1) + b1).relu()
@@ -91,15 +92,95 @@ def net(X, is_training=True):
     # 返回值为输出层输出
     return torch.matmul(H2, W3) + b3
 
+# 准确率评估函数
+# 本函数已保存在d2lzh_pytorch
+def evaluate_accuracy(data_iter, net):
+    acc_sum, n = 0.0, 0
+    for X, y in data_iter:
+        # 判断这个net是不是torch.nn.Module类型或子类
+        if isinstance(net, torch.nn.Module):
+            # 如果是，那么就会有eval()和train()方法
+            net.eval() # 评估模式, 这会关闭dropout
+            acc_sum += (net(X).argmax(dim=1) == y).float().sum().item()
+            net.train() # 改回训练模式
+        else: # 自定义的模型
+            if('is_training' in net.__code__.co_varnames): # 如果有is_training这个参数
+                # 将is_training设置成False
+                acc_sum += (net(X, is_training=False).argmax(dim=1) == y).float().sum().item()
+            else:
+                # 否则就不管了，直接算（...）
+                acc_sum += (net(X).argmax(dim=1) == y).float().sum().item()
+        n += y.shape[0]
+    return acc_sum / n
 
+# =======================
+# 4. 训练和测试模型
+# =======================
 
+num_epochs, lr, batch_size = 5, 100.0, 256
+# 图片分类，用softmax+交叉熵，即batch平均损失CrossEntropyLoss
+# 同样，CrossEntropyLoss和train_ch3中的sgd都有除以batch，所以lr得乘大一点
+loss = torch.nn.CrossEntropyLoss()
+train_iter, test_iter = d2l.load_data_fashion_mnist(batch_size)
+d2l.train_ch3(net, train_iter, test_iter, loss, num_epochs, batch_size, params, lr)
 
+# 这里把d2l.train_ch3放上来再复习一下
+"""
+def train_ch3(net, train_iter, test_iter, loss, num_epochs, batch_size,
+              params=None, lr=None, optimizer=None):
+    for epoch in range(num_epochs):
+        train_l_sum, train_acc_sum, n = 0.0, 0.0, 0
+        for X, y in train_iter:
+            y_hat = net(X)
+            l = loss(y_hat, y).sum()
+            
+            # 梯度清零
+            if optimizer is not None:
+                optimizer.zero_grad()
+            elif params is not None and params[0].grad is not None:
+                for param in params:
+                    param.grad.data.zero_()
+            
+            l.backward()
+            if optimizer is None:
+                sgd(params, lr, batch_size)
+            else:
+                optimizer.step()  # “softmax回归的简洁实现”一节将用到
+            
+            
+            train_l_sum += l.item()
+            train_acc_sum += (y_hat.argmax(dim=1) == y).sum().item()
+            n += y.shape[0]
+        test_acc = evaluate_accuracy(test_iter, net)
+        print('epoch %d, loss %.4f, train acc %.3f, test acc %.3f'
+              % (epoch + 1, train_l_sum / n, train_acc_sum / n, test_acc))
 
+"""
 
+# =======================
+# 5. 简洁实现
+# =======================
+# 这里torch也直接内置了Dropout层
+# nn.Sequential 本质上就是 torch.nn.Module 的一个子类
+# 所以会有net.eval()和net.train()方法
+net = nn.Sequential(
+        d2l.FlattenLayer(),
+        nn.Linear(num_inputs, num_hiddens1),
+        nn.ReLU(),
+        nn.Dropout(drop_prob1),
+        nn.Linear(num_hiddens1, num_hiddens2),
+        nn.ReLU(),
+        nn.Dropout(drop_prob2),
+        nn.Linear(num_hiddens2, 10)
+        )
 
+for param in net.parameters():
+    nn.init.normal_(param, mean=0, std=0.01)
 
-
-
+# 训练并测试模型
+# torch的SGD不会除以batch，和CrossEntropyLoss刚好搭配
+optimizer = torch.optim.SGD(net.parameters(), lr=0.5)
+d2l.train_ch3(net, train_iter, test_iter, loss, num_epochs, batch_size, None, None, optimizer)
 
 
 
