@@ -9,7 +9,7 @@ import torch
 import torchvision
 import numpy as np
 import sys
-sys.path.append("..") # 为了导入上层目录的d2lzh_pytorch
+sys.path.append("../..") # 为了导入上层目录的d2lzh_pytorch
 import d2lzh_pytorch as d2l
 from matplotlib import pyplot as plt
 
