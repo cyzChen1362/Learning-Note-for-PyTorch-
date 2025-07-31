@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/LiMu_Book_CH_2.iml" filepath="$PROJECT_DIR$/.idea/LiMu_Book_CH_2.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/LearningNote_Dive-into-DL-PyTorch.iml" filepath="$PROJECT_DIR$/.idea/LearningNote_Dive-into-DL-PyTorch.iml" />
     </modules>
   </component>
 </project>
