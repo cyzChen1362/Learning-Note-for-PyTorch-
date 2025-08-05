@@ -12,7 +12,7 @@ import d2lzh_pytorch as d2l
 # =======================
 # 1. 生成数据集
 # =======================
-# 真实值：y = 0.5 + Σ 0.01xi + e
+# 真实值：y = 0.05 + Σ 0.01xi + e
 # 这里的e就是随机噪声
 
 # 考虑过拟合问题，训练集样本数为20，输入维度为200
@@ -88,6 +88,8 @@ def fit_and_plot(lambd):
 
             """
 
+        # 由于这里epoch=100，所以即使是在外循环append而不是每个batch_size都append也没关系
+        # 况且这里batch_size=1
         train_ls.append(loss(net(train_features, w, b), train_labels).mean().item())
         test_ls.append(loss(net(test_features, w, b), test_labels).mean().item())
 

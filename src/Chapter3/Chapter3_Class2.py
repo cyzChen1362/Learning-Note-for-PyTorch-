@@ -49,10 +49,11 @@ def data_iter(batch_size, features, labels):
     indices = list(range(num_examples))
     # 样本的读取顺序是随机的
     random.shuffle(indices)
+    # 注意这里步长是batch_size，不是步长为1
     for i in range(0, num_examples, batch_size):
         # 索引行数j = indices索引列表中的第i行到第i+batch_size行，并进行类型转换
         j = torch.LongTensor(indices[i: min(i + batch_size, num_examples)]) # 最后一次可能不足一个batch
-        # 在第0维索引行数为j的这些样本，提取出来，yield返回这两个提取值，并且省内存
+        # 在第0维索引行数为j（j是一个列表而不是一个数）的这些样本，提取出来，yield返回这两个提取值，并且省内存
         yield  features.index_select(0, j), labels.index_select(0, j)
 
 batch_size = 10

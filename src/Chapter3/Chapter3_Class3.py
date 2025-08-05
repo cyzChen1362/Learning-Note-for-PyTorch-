@@ -69,6 +69,7 @@ class LinearNet(nn.Module):
         # nn.Linear 是 PyTorch 的线性变换模块，自动包含权重和偏置
         self.linear = nn.Linear(n_feature, 1)
     # forward 定义前向传播
+    # 必须用这个名字
     def forward(self, x):
         y = self.linear(x)
         return y
@@ -130,7 +131,7 @@ optimizer = optim.SGD(net.parameters(), lr=0.03)
 print(optimizer)
 
 """
-注：此处sgd同：
+注：此处sgd类似（但没除以batch_size）：
 
 def sgd(params, lr, batch_size):
     # params为θ；param为w,b；lr为learning rate；

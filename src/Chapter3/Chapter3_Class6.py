@@ -55,10 +55,10 @@ def softmax(X):
     return X_exp / partition
 
 # test softmax(X)
-X = torch.rand((2, 5))
-X_prob = softmax(X)
-print(X_prob)
-print(X_prob.sum(dim=1, keepdim=True))
+# X = torch.rand((2, 5))
+# X_prob = softmax(X)
+# print(X_prob)
+# print(X_prob.sum(dim=1, keepdim=True))
 
 # =======================
 # 4. 定义模型
