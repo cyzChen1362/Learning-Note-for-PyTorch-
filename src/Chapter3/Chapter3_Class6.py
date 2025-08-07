@@ -177,7 +177,8 @@ train_ch3(net, train_iter, test_iter, cross_entropy, num_epochs, batch_size, [W,
 # =======================
 # iter(test_iter)将test_iter转换成一个迭代器对象；
 # next()取出第一个batch
-X, y = iter(test_iter).next()
+# X, y = iter(test_iter).next()
+X, y = next(iter(test_iter))
 # 将真实标签y和模型预测结果net(X)的标签从数字转为对应的文字标签
 true_labels = d2l.get_fashion_mnist_labels(y.numpy())
 pred_labels = d2l.get_fashion_mnist_labels(net(X).argmax(dim=1).numpy())

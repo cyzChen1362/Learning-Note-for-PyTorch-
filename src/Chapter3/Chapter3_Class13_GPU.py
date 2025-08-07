@@ -26,11 +26,18 @@ sys.path.append("..")
 import d2lzh_pytorch as d2l
 
 """
-    丢弃法实验
+    丢弃法实验_GPU
 """
 
 import time
 start = time.time()
+
+# =======================
+# 0. 选择设备
+# =======================
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print("Using device:", device)
+
 
 # =======================
 # 1. dropout函数
@@ -49,7 +56,7 @@ def dropout(X, drop_prob):
     # 生成一个X同形张量，元素的值为0~1，然后与keep_prob判断
     # 小于keep_prob的为Ture-->1，大于为0
     # 这样mask就是一个由0/1组成的张量，就得出了是否保留参数的分布
-    mask = (torch.rand(X.shape) < keep_prob).float()
+    mask = (torch.rand(X.shape, device=X.device) < keep_prob).float()
     # 通过mask乘以张量X，实现0的地方不保留，最后拉伸一下
     return mask * X / keep_prob
 
@@ -66,12 +73,15 @@ def dropout(X, drop_prob):
 # 定义一个包含两个隐藏层的多层感知机
 num_inputs, num_outputs, num_hiddens1, num_hiddens2 = 784, 10, 256, 256
 # 随机初始化参数
-W1 = torch.tensor(np.random.normal(0, 0.01, size=(num_inputs, num_hiddens1)), dtype=torch.float, requires_grad=True)
-b1 = torch.zeros(num_hiddens1, requires_grad=True)
-W2 = torch.tensor(np.random.normal(0, 0.01, size=(num_hiddens1, num_hiddens2)), dtype=torch.float, requires_grad=True)
-b2 = torch.zeros(num_hiddens2, requires_grad=True)
-W3 = torch.tensor(np.random.normal(0, 0.01, size=(num_hiddens2, num_outputs)), dtype=torch.float, requires_grad=True)
-b3 = torch.zeros(num_outputs, requires_grad=True)
+W1 = torch.tensor(np.random.normal(0, 0.01, size=(num_inputs, num_hiddens1)),
+                  dtype=torch.float, requires_grad=True, device=device)
+b1 = torch.zeros(num_hiddens1, requires_grad=True, device=device)
+W2 = torch.tensor(np.random.normal(0, 0.01, size=(num_hiddens1, num_hiddens2)),
+                  dtype=torch.float, requires_grad=True, device=device)
+b2 = torch.zeros(num_hiddens2, requires_grad=True, device=device)
+W3 = torch.tensor(np.random.normal(0, 0.01, size=(num_hiddens2, num_outputs)),
+                  dtype=torch.float, requires_grad=True, device=device)
+b3 = torch.zeros(num_outputs, requires_grad=True, device=device)
 # 参数列表
 params = [W1, b1, W2, b2, W3, b3]
 
@@ -83,7 +93,7 @@ drop_prob1, drop_prob2 = 0.2, 0.5
 
 # 网络
 def net(X, is_training=True):
-    X = X.view(-1, num_inputs)
+    X = X.view(-1, num_inputs).to(device)
     H1 = (torch.matmul(X, W1) + b1).relu()
     if is_training:  # 只在训练模型时使用丢弃法
         # 丢弃第一个隐藏层的部分输出
@@ -100,6 +110,7 @@ def net(X, is_training=True):
 def evaluate_accuracy(data_iter, net):
     acc_sum, n = 0.0, 0
     for X, y in data_iter:
+        X, y = X.to(device), y.to(device)
         # 判断这个net是不是torch.nn.Module类型或子类
         if isinstance(net, torch.nn.Module):
             # 如果是，那么就会有eval()和train()方法
@@ -125,15 +136,21 @@ num_epochs, lr, batch_size = 5, 100.0, 256
 # 同样，CrossEntropyLoss和train_ch3中的sgd都有除以batch，所以lr得乘大一点
 loss = torch.nn.CrossEntropyLoss()
 train_iter, test_iter = d2l.load_data_fashion_mnist(batch_size)
-d2l.train_ch3(net, train_iter, test_iter, loss, num_epochs, batch_size, params, lr)
 
-# 这里把d2l.train_ch3放上来再复习一下
-"""
+# 这里d2l.train_ch3改一下，加上.to(device)
+
+def sgd(params, lr, batch_size):
+    # 为了和原书保持一致，这里除以了batch_size，但是应该是不用除的，因为一般用PyTorch计算loss时就默认已经
+    # 沿batch维求了平均了。
+    for param in params:
+        param.data -= lr * param.grad / batch_size # 注意这里更改param时用的param.data
+
 def train_ch3(net, train_iter, test_iter, loss, num_epochs, batch_size,
               params=None, lr=None, optimizer=None):
     for epoch in range(num_epochs):
         train_l_sum, train_acc_sum, n = 0.0, 0.0, 0
         for X, y in train_iter:
+            X, y = X.to(device), y.to(device)
             y_hat = net(X)
             l = loss(y_hat, y).sum()
             
@@ -158,7 +175,8 @@ def train_ch3(net, train_iter, test_iter, loss, num_epochs, batch_size,
         print('epoch %d, loss %.4f, train acc %.3f, test acc %.3f'
               % (epoch + 1, train_l_sum / n, train_acc_sum / n, test_acc))
 
-"""
+train_ch3(net, train_iter, test_iter, loss, num_epochs, batch_size, params, lr)
+
 
 # =======================
 # 5. 简洁实现
@@ -177,14 +195,15 @@ net = nn.Sequential(
         nn.Linear(num_hiddens2, 10)
         )
 
+net = net.to(device)
 for param in net.parameters():
     nn.init.normal_(param, mean=0, std=0.01)
 
 # 训练并测试模型
 # torch的SGD不会除以batch，和CrossEntropyLoss刚好搭配
 optimizer = torch.optim.SGD(net.parameters(), lr=0.5)
-d2l.train_ch3(net, train_iter, test_iter, loss, num_epochs, batch_size, None, None, optimizer)
+train_ch3(net, train_iter, test_iter, loss, num_epochs, batch_size, None, None, optimizer)
+
 
 end = time.time()
 print(f"训练用时：{end - start:.2f} 秒")
-
