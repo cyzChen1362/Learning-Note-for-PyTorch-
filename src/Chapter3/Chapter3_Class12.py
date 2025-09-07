@@ -77,7 +77,7 @@ def fit_and_plot(lambd):
             if w.grad is not None:
                 w.grad.data.zero_()
                 b.grad.data.zero_()
-            # 后向传播
+            # 反向传播
             l.backward()
             # 这里优化器会除以batch_size，所以上面的sum()是必要的
             d2l.sgd([w, b], lr, batch_size)

@@ -158,7 +158,7 @@ class FlattenLayer(torch.nn.Module):
 
 # ########################### 3.11 ###############################
 def semilogy(x_vals, y_vals, x_label, y_label, x2_vals=None, y2_vals=None,
-             legend=None, figsize=(3.5, 2.5)):
+             legend=None, figsize=(6, 4)):
     set_figsize(figsize)
     plt.xlabel(x_label)
     plt.ylabel(y_label)

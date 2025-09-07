@@ -35,7 +35,7 @@ print(all_features.shape)
 # =======================
 # all_features.dtypes != 'object'将所有列类型不是object的置为True
 # 外面的all_features.dtypes将True的几列筛出来
-# .index再返回列名
+# .index再返回列索引
 numeric_features = all_features.dtypes[all_features.dtypes != 'object'].index
 
 # all_features[numeric_features]是一个DataFrame
@@ -216,10 +216,8 @@ def train_and_pred(train_features, test_features, train_labels, test_data,
     # 把预测结果 preds 转成一维（保证行数和测试集对应），存到 test_data 的 SalePrice 列
     # 这里是为了把二维数组压平成一维数组（即一行），好让 Pandas 接收它为一个「列」
     # 因为你不能把一个n行1列的二维数组传到'SalePrice'列中
-    # 所以你要将得到的列向量preds（列向量有n行1列所以是二维的）转成一维
-    # 而转成一维数据后，这个数据有第0行，第1行...
-    # 在这里第0行类似一个list，也就是pred的list
-    # 所以取[0]
+    # 所以你要将得到的列向量preds（列向量有n行1列所以是二维的）转成1行n列
+    # 此时结果是 (1, n)，是一个二维数组。为了得到一维向量 (n,)，就取第一行 [0]：
     test_data['SalePrice'] = pd.Series(preds.reshape(1, -1)[0])
     # 把 test_data 的 Id 和预测的 SalePrice 两列拼接成新的 DataFrame submission
     submission = pd.concat([test_data['Id'], test_data['SalePrice']], axis=1)

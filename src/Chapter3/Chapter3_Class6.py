@@ -71,18 +71,12 @@ def net(X):
 # 5. 定义损失函数
 # =======================
 """
-# 预测概率张量
-y_hat = torch.tensor([[0.1, 0.3, 0.6], [0.3, 0.2, 0.5]])
-# 真实的标签分别是第0类和第2类
-y = torch.LongTensor([0, 2])
-
-# y变成2行1列
-# gather(dim=1, index)：在每一行中按dim=1列检索，根据index的位置取出对应值
 y_hat.gather(1, y.view(-1, 1))
 
-输出：
-tensor([[0.1000],
-        [0.5000]])
+设 y_hat 形状是 (N, C)，每一行是一个样本在 C 个类别上的预测概率。
+y 是长度为 N 的整型向量（每个样本的真实类别索引，取值在 [0, C-1]）。
+y.view(-1, 1) 变成形状 (N, 1) 的“列向量”，第 i 行存着第 i 个样本的真实类别列号。
+gather(1, ...) 表示在维度 1（也就是“列”这个维度）上，按每行给定的列号取值，于是得到形状 (N, 1) 的张量，每个位置就是该样本“真实类别”的预测概率。
         
 """
 
@@ -100,8 +94,6 @@ def accuracy(y_hat, y):
     # float()将判断返回布尔值变成0/1，然后mean即可得出正确率
     return (y_hat.argmax(dim=1) == y).float().mean().item()
 print(accuracy(y_hat, y))
-
-输出：0.5
 
 """
 
@@ -123,7 +115,6 @@ def evaluate_accuracy(data_iter, net):
 # 7. 训练模型
 # =======================
 
-# 更新num_epochs次梯度，学习率lr
 num_epochs, lr = 5, 0.1
 
 # 本函数已保存在d2lzh包中方便以后使用
