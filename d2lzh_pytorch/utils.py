@@ -666,6 +666,7 @@ def train_pytorch_ch7(optimizer_fn, optimizer_hyperparams, features, labels,
     plt.plot(np.linspace(0, num_epochs, len(ls)), ls)
     plt.xlabel('epoch')
     plt.ylabel('loss')
+    #
     plt.show()
 
 
