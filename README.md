@@ -14,11 +14,11 @@
 ## 🏗 仓库结构
 
 LearningNote_Dive-into-DL-PyTorch/  
-├─ d2lzh_pytorch/ # 自定义工具包（封装的d2l函数）  
+├─ d2lzh_pytorch/
 │ ├─ init.py  
 │ └─ utils.py  
 │  
-├─ data/ # 数据集与示例数据  
+├─ data/
 │ ├─ img/  
 │ ├─ Kaggle_House/  
 │ ├─ airfoil_self_noise.dat  
