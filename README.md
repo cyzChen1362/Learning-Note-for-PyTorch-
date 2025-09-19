@@ -14,11 +14,11 @@
 ## 🏗 仓库结构
 
 LearningNote_Dive-into-DL-PyTorch/  
-├─ d2lzh_pytorch/
+├─ d2lzh_pytorch/  
 │ ├─ init.py  
 │ └─ utils.py  
 │  
-├─ data/
+├─ data/  
 │ ├─ img/  
 │ ├─ Kaggle_House/  
 │ ├─ airfoil_self_noise.dat  
