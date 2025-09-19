@@ -1,4 +1,4 @@
-"""
+r"""
 学习笔记
 
 原始工程来源：
@@ -33,6 +33,7 @@ import d2lzh_pytorch as d2l
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 d2l.set_figsize()
-img = Image.open('data/img/cat1.jpg')
+img = Image.open('../../data/img/cat1.jpg')
 d2l.plt.imshow(img)
+d2l.plt.show()
 
