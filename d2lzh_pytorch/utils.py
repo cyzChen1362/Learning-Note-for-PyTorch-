@@ -696,6 +696,7 @@ def show_images(imgs, num_rows, num_cols, scale=2):
             axes[i][j].imshow(imgs[i * num_cols + j])
             axes[i][j].axes.get_xaxis().set_visible(False)
             axes[i][j].axes.get_yaxis().set_visible(False)
+    plt.show()
     return axes
 
 def train(train_iter, test_iter, net, loss, optimizer, device, num_epochs):
