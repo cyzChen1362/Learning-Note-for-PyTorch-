@@ -11,6 +11,11 @@ from tqdm import tqdm
 from PIL import Image
 from collections import namedtuple
 
+import hashlib
+import requests
+import pandas as pd
+import shutil
+
 from IPython import display
 from matplotlib import pyplot as plt
 import torch
@@ -1083,6 +1088,115 @@ def load_data_pikachu(batch_size, edge_size=256, data_dir = '../../data/pikachu'
 
     val_iter = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size,
                                            shuffle=False, num_workers=4)
+    return train_iter, val_iter
+
+# ################################# 9.6.5 ############################
+
+# 由于新书9.6-9.13仍有部分未施工完毕
+# 所以9.6-9.13将会跟随原书学习，同时修改部分d2l代码
+# 使用香蕉数据集，契合原书9.6-9.13
+
+DATA_HUB = dict()
+DATA_URL = 'http://d2l-data.s3-accelerate.amazonaws.com/'
+
+DATA_HUB['banana-detection'] = (
+    DATA_URL + 'banana-detection.zip',
+    '5de26c8fce5ccdea9f91267273464dc968d20d72')
+
+def download(name, cache_dir=os.path.join('..', 'data')):
+    """下载一个DATA_HUB中的文件，返回本地文件名
+
+    Defined in :numref:`sec_kaggle_house`"""
+    assert name in DATA_HUB, f"{name} 不存在于 {DATA_HUB}"
+    url, sha1_hash = DATA_HUB[name]
+    os.makedirs(cache_dir, exist_ok=True)
+    fname = os.path.join(cache_dir, url.split('/')[-1])
+    if os.path.exists(fname):
+        sha1 = hashlib.sha1()
+        with open(fname, 'rb') as f:
+            while True:
+                data = f.read(1048576)
+                if not data:
+                    break
+                sha1.update(data)
+        if sha1.hexdigest() == sha1_hash:
+            return fname  # 命中缓存
+    print(f'正在从{url}下载{fname}...')
+    r = requests.get(url, stream=True, verify=True)
+    with open(fname, 'wb') as f:
+        f.write(r.content)
+    return fname
+
+def download_extract(name, folder=None):
+    """下载并解压zip/tar文件
+
+    Defined in :numref:`sec_kaggle_house`"""
+    fname = download(name)
+    base_dir = os.path.dirname(fname)
+    data_dir, ext = os.path.splitext(fname)
+    if ext == '.zip':
+        fp = zipfile.ZipFile(fname, 'r')
+    elif ext in ('.tar', '.gz'):
+        fp = tarfile.open(fname, 'r')
+    else:
+        assert False, '只有zip/tar文件可以被解压缩'
+    fp.extractall(base_dir)
+    return os.path.join(base_dir, folder) if folder else data_dir
+
+def read_data_bananas(is_train=True):
+    # 先按照 d2l 默认规则下载
+    tmp_dir = download_extract('banana-detection')
+
+    # 希望的最终路径
+    target_dir = r"D:\LearningDeepLearning\LearningNote_Dive-into-DL-PyTorch\data\bananas"
+    os.makedirs(target_dir, exist_ok=True)
+
+    # 如果目标目录为空，则移动一次即可
+    if not os.listdir(target_dir):
+        for item in os.listdir(tmp_dir):
+            s = os.path.join(tmp_dir, item)
+            d = os.path.join(target_dir, item)
+            if os.path.isdir(s):
+                shutil.copytree(s, d, dirs_exist_ok=True)
+            else:
+                shutil.copy2(s, d)
+
+    sub_dir = 'bananas_train' if is_train else 'bananas_val'
+    csv_fname = os.path.join(target_dir, sub_dir, 'label.csv')
+
+    csv_data = pd.read_csv(csv_fname).set_index('img_name')
+
+    images, targets = [], []
+    for img_name, target in csv_data.iterrows():
+        img_path = os.path.join(target_dir, sub_dir, 'images', img_name)
+        images.append(torchvision.io.read_image(img_path))
+        targets.append(list(target))
+
+    return images, torch.tensor(targets).unsqueeze(1) / 256
+
+class BananasDataset(torch.utils.data.Dataset):
+    """一个用于加载香蕉检测数据集的自定义数据集
+
+    Defined in :numref:`sec_object-detection-dataset`"""
+    def __init__(self, is_train):
+        self.features, self.labels = read_data_bananas(is_train)
+        print('read ' + str(len(self.features)) + (f' training examples' if
+              is_train else f' validation examples'))
+
+    def __getitem__(self, idx):
+        return (self.features[idx].float(), self.labels[idx])
+
+    def __len__(self):
+        return len(self.features)
+
+def load_data_bananas(batch_size):
+    """加载香蕉检测数据集
+
+    Defined in :numref:`sec_object-detection-dataset`"""
+    train_iter = torch.utils.data.DataLoader(BananasDataset(is_train=True),
+                                             batch_size, shuffle=True)
+    val_iter = torch.utils.data.DataLoader(BananasDataset(is_train=False),
+                                           batch_size)
     return train_iter, val_iter
 
 
