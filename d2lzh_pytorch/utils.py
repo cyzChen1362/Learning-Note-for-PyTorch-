@@ -701,7 +701,7 @@ def show_images(imgs, num_rows, num_cols, scale=2):
             axes[i][j].imshow(imgs[i * num_cols + j])
             axes[i][j].axes.get_xaxis().set_visible(False)
             axes[i][j].axes.get_yaxis().set_visible(False)
-    plt.show()
+    # plt.show()
     return axes
 
 def train(train_iter, test_iter, net, loss, optimizer, device, num_epochs):
@@ -1147,11 +1147,12 @@ def read_data_bananas(is_train=True):
     # 先按照 d2l 默认规则下载
     tmp_dir = download_extract('banana-detection')
 
-    # 希望的最终路径
+    # 希望的最终路径，在这个路径下创建文件夹
     target_dir = r"D:\LearningDeepLearning\LearningNote_Dive-into-DL-PyTorch\data\bananas"
     os.makedirs(target_dir, exist_ok=True)
 
     # 如果目标目录为空，则移动一次即可
+    # 将文件从默认规则下载的位置移动到目标路径
     if not os.listdir(target_dir):
         for item in os.listdir(tmp_dir):
             s = os.path.join(tmp_dir, item)
@@ -1161,17 +1162,35 @@ def read_data_bananas(is_train=True):
             else:
                 shutil.copy2(s, d)
 
+    # 下面的逻辑和源代码完全相同
+
+    # 根据 is_train 决定读 bananas_train 还是 bananas_val
     sub_dir = 'bananas_train' if is_train else 'bananas_val'
+    # label.csv 是标注文件，存储每张图片的边界框信息
     csv_fname = os.path.join(target_dir, sub_dir, 'label.csv')
 
+    # 用 pandas 读入 csv，img_name 列设为索引
+    # 每行形如：
+    # img_name,x_min,y_min,x_max,y_max
+    # 0001.png,48,240,195,371
+    # ...
+    # 用了set_index('img_name')，也就是label.csv的index就是img_name列
     csv_data = pd.read_csv(csv_fname).set_index('img_name')
 
+    # for idx, row in csv_data.iterrows():
+    # 每次迭代返回 (index, Series) 这样的二元组：
+    # idx：该行的索引值（这里就是 img_name，因为前面用 set_index('img_name')）。
+    # row：该行数据，类型是 pandas.Series，键为列名，值为该行对应的数值。
     images, targets = [], []
     for img_name, target in csv_data.iterrows():
+        # img_path：拼出图片完整路径
         img_path = os.path.join(target_dir, sub_dir, 'images', img_name)
+        # 读取一张图片并追加到 images 列表，返回形状[C, H, W]
         images.append(torchvision.io.read_image(img_path))
         targets.append(list(target))
 
+    # targets转成torch.Tensor，形状为[N, 5] [batch, label xmin ymin xmax ymax]
+    # 将坐标除以 256，实现归一化到 0–1 区间(数据集中图像尺寸是 256×256)
     return images, torch.tensor(targets).unsqueeze(1) / 256
 
 class BananasDataset(torch.utils.data.Dataset):
