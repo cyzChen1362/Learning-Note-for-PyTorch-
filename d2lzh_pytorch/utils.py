@@ -23,6 +23,8 @@ from torch import nn
 import torch.nn.functional as F
 import torchvision
 import torchvision.transforms as transforms
+from torchvision.ops import box_iou
+
 # import torchtext
 # import torchtext.vocab as Vocab
 import numpy as np
@@ -777,6 +779,54 @@ def MultiBoxPrior(feature_map, sizes=[0.75, 0.5, 0.25], ratios=[1, 2, 0.5]):
     
     return torch.tensor(anchors, dtype=torch.float32).view(1, -1, 4)
 
+# 这里我直接把MultiBoxPrior换成新的Torch版
+
+def MultiBoxPrior_torch(feature_map, sizes=[0.75, 0.5, 0.25], ratios=[1, 2, 0.5]):
+    """
+    纯 torch + GPU 版 MultiBoxPrior
+    Args:
+        feature_map: torch.Tensor, shape [N, C, H, W]
+        sizes:  List[float]  0~1
+        ratios: List[float]
+    Returns:
+        anchors: torch.Tensor, shape (1, num_anchors, 4)
+                 已与 feature_map 在同一 device
+    """
+    device = feature_map.device
+    dtype  = feature_map.dtype
+
+    # ---- 生成 base_anchors (num_sizes* num_ratios, 4) ----
+    pairs = []
+    for r in ratios:
+        pairs.append((sizes[0], math.sqrt(r)))
+    for s in sizes[1:]:
+        pairs.append((s, math.sqrt(ratios[0])))
+
+    pairs = torch.tensor(pairs, dtype=dtype, device=device)      # (k, 2)
+    ss1 = pairs[:, 0] * pairs[:, 1]                              # size * sqrt(r)
+    ss2 = pairs[:, 0] / pairs[:, 1]                              # size / sqrt(r)
+    base_anchors = torch.stack([-ss1, -ss2, ss1, ss2], dim=1)    # (k, 4)
+    base_anchors = base_anchors / 2.0
+
+    # ---- 平移到 feature_map 的每个 cell ----
+    h, w = feature_map.shape[-2:]
+    # range(0, w)/w 以及 range(0, h)/h
+    shifts_x = torch.arange(w, dtype=dtype, device=device) / w
+    shifts_y = torch.arange(h, dtype=dtype, device=device) / h
+    shift_y, shift_x = torch.meshgrid(shifts_y, shifts_x, indexing="ij")  # (h,w)
+    # [h*w, 4] -> (x, y, x, y)
+    shifts = torch.stack([
+        shift_x.reshape(-1),
+        shift_y.reshape(-1),
+        shift_x.reshape(-1),
+        shift_y.reshape(-1)
+    ], dim=1)
+
+    # ---- 广播相加得到最终 anchors ----
+    anchors = shifts[:, None, :] + base_anchors[None, :, :]      # (h*w, k, 4)
+    anchors = anchors.reshape(1, -1, 4)                          # (1, h*w*k, 4)
+    return anchors
+
 def show_bboxes(axes, bboxes, labels=None, colors=None):
     def _make_list(obj, default_values=None):
         if obj is None:
@@ -845,26 +895,45 @@ def assign_anchor(bb, anchor, jaccard_threshold=0.5):
     Returns:
         assigned_idx: shape: (na, ), 每个anchor分配的真实bb对应的索引, 若未分配任何bb则为-1
     """
+    device = anchor.device
     na = anchor.shape[0]
     nb = bb.shape[0]
-    jaccard = compute_jaccard(anchor, bb).detach().cpu().numpy() # shape: (na, nb)
-    assigned_idx = np.ones(na) * -1  # 初始全为-1
+
+    # 这一部分为了规避cpu，直接在gpu上计算
+    # 源代码
+    # jaccard = compute_jaccard(anchor, bb).detach().cpu().numpy() # shape: (na, nb)
+    # 新代码
+    jaccard = compute_jaccard(anchor, bb)  # (na, nb)
+
+    assigned_idx = torch.full((na,), -1, dtype=torch.long, device=device)  # 初始全为-1
     
     # 先为每个bb分配一个anchor(不要求满足jaccard_threshold)
-    jaccard_cp = jaccard.copy()
+    # 这里因为改用Tensor，所以用.clone()而不是.copy()
+    # 源代码
+    # jaccard_cp = jaccard.copy()
+    # 新代码
+    jaccard_cp = jaccard.clone().to(jaccard.device)
+
     for j in range(nb):
-        i = np.argmax(jaccard_cp[:, j])
+        # 源代码
+        # i = np.argmax(jaccard_cp[:, j])
+        # 新代码
+        i = torch.argmax(jaccard_cp[:, j]).item()
         assigned_idx[i] = j
         jaccard_cp[i, :] = float("-inf") # 赋值为负无穷, 相当于去掉这一行
      
     # 处理还未被分配的anchor, 要求满足jaccard_threshold
     for i in range(na):
         if assigned_idx[i] == -1:
-            j = np.argmax(jaccard[i, :])
+            # 源代码
+            # j = np.argmax(jaccard[i, :])
+            # 新代码
+            j = torch.argmax(jaccard[i, :]).item()
             if jaccard[i, j] >= jaccard_threshold:
                 assigned_idx[i] = j
-    
-    return torch.tensor(assigned_idx, dtype=torch.long)
+
+    # 保证返回的张量与 anchor 在同一设备
+    return assigned_idx
 
 def xy_to_cxcy(xy):
     """
@@ -877,6 +946,32 @@ def xy_to_cxcy(xy):
     """
     return torch.cat([(xy[:, 2:] + xy[:, :2]) / 2,  # c_x, c_y
                       xy[:, 2:] - xy[:, :2]], 1)  # w, h
+
+# 这里我直接写原版的坐标变换了，更显式而且实现功能完全相同
+
+def box_corner_to_center(boxes):
+    """从（左上，右下）转换到（中间，宽度，高度）
+
+    Defined in :numref:`sec_bbox`"""
+    x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+    cx = (x1 + x2) / 2
+    cy = (y1 + y2) / 2
+    w = x2 - x1
+    h = y2 - y1
+    boxes = torch.stack((cx, cy, w, h), axis=-1)
+    return boxes
+
+def box_center_to_corner(boxes):
+    """从（中间，宽度，高度）转换到（左上，右下）
+
+    Defined in :numref:`sec_bbox`"""
+    cx, cy, w, h = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+    x1 = cx - 0.5 * w
+    y1 = cy - 0.5 * h
+    x2 = cx + 0.5 * w
+    y2 = cy + 0.5 * h
+    boxes = torch.stack((x1, y1, x2, y2), axis=-1)
+    return boxes
 
 def MultiBoxTarget(anchor, label):
     """
@@ -892,6 +987,11 @@ def MultiBoxTarget(anchor, label):
         bbox_mask: 形状同bbox_offset, 每个锚框的掩码, 一一对应上面的偏移量, 负类锚框(背景)对应的掩码均为0, 正类锚框的掩码均为1
         cls_labels: 每个锚框的标注类别, 其中0表示为背景, 形状为(bn，锚框总数)
     """
+    # print("anchor device:", anchor.device, "label device:", label.device)
+
+    # 这里兼容旧版：旧版是无真实框行全为0，然后算IoU时必然为0，相当于跳过了
+    # 新版这里应该也可以兼容旧数据集......所以就不改了
+
     assert len(anchor.shape) == 3 and len(label.shape) == 3
     bn = label.shape[0]
     
@@ -908,11 +1008,15 @@ def MultiBoxTarget(anchor, label):
             cls_labels: (锚框总数, 4), 0代表背景
         """
         an = anc.shape[0]
+        # 上一级assign_anchor我也改了device
         assigned_idx = assign_anchor(lab[:, 1:], anc) # (锚框总数, )
         bbox_mask = ((assigned_idx >= 0).float().unsqueeze(-1)).repeat(1, 4) # (锚框总数, 4)
 
-        cls_labels = torch.zeros(an, dtype=torch.long) # 0表示背景
-        assigned_bb = torch.zeros((an, 4), dtype=torch.float32) # 所有anchor对应的bb坐标
+        # 然后关于device不同导致出错的问题，这里也修改了一下
+
+        device = anc.device
+        cls_labels = torch.zeros(an, dtype=torch.long, device=device) # 0表示背景
+        assigned_bb = torch.zeros((an, 4), dtype=torch.float32, device=device) # 所有anchor对应的bb坐标
         for i in range(an):
             bb_idx = assigned_idx[i]
             if bb_idx >= 0: # 即非背景
@@ -942,6 +1046,83 @@ def MultiBoxTarget(anchor, label):
     bbox_mask = torch.stack(batch_mask)
     cls_labels = torch.stack(batch_cls_labels)
     
+    return [bbox_offset, bbox_mask, cls_labels]
+
+@torch.no_grad()
+def MultiBoxTarget_fast(anchor, label, jaccard_threshold=0.5, eps=1e-6):
+    """
+    更快的 MultiBoxTarget_fast 实现：
+    使用 torchvision.ops.box_iou 替代 Python 循环，大幅减少 CPU 端开销。
+
+    Args:
+        anchor: torch.Tensor, 形状 (1, A, 4)，归一化 [xmin, ymin, xmax, ymax]
+        label:  torch.Tensor, 形状 (B, M, 5)，每行 [class, xmin, ymin, xmax, ymax]
+                没有真实框的行可填 -1
+    Returns:
+        [bbox_offset, bbox_mask, cls_labels]
+          bbox_offset: (B, A*4)
+          bbox_mask:   (B, A*4)
+          cls_labels:  (B, A)   0 表示背景
+    """
+    assert anchor.ndim == 3 and label.ndim == 3
+    device = anchor.device
+    A = anchor.size(1)              # 锚框数
+    anc = anchor[0]                 # (A, 4)
+    center_anc = xy_to_cxcy(anc)
+
+    batch_offsets, batch_masks, batch_cls = [], [], []
+    B = label.size(0)
+
+    for b in range(B):
+        lab = label[b]
+        # 过滤掉无效行（类别<0）
+        valid = lab[:, 0] >= 0
+        lab = lab[valid]
+        if lab.numel() == 0:
+            # 没有真实框：全部背景
+            batch_offsets.append(torch.zeros(A * 4, device=device))
+            batch_masks.append(torch.zeros(A * 4, device=device))
+            batch_cls.append(torch.zeros(A, dtype=torch.long, device=device))
+            continue
+
+        gt_cls = lab[:, 0].long() + 1               # 正类从1开始
+        gt_box = lab[:, 1:5]
+
+        # IoU 计算 (A, G)
+        ious = box_iou(anc, gt_box)
+
+        # 先每个 anchor 找 IoU 最大的 GT
+        best_ious, best_gt = ious.max(dim=1)
+        assigned_idx = torch.full((A,), -1, dtype=torch.long, device=device)
+        pos = best_ious >= jaccard_threshold
+        assigned_idx[pos] = best_gt[pos]
+
+        # 保证每个 GT 至少分到一个 anchor
+        best_anchor = ious.argmax(dim=0)
+        assigned_idx[best_anchor] = torch.arange(gt_box.size(0), device=device)
+
+        # 构造标签和偏移
+        cls_labels = torch.zeros(A, dtype=torch.long, device=device)
+        assigned_bb = torch.zeros(A, 4, device=device)
+        pos = assigned_idx >= 0
+        if pos.any():
+            cls_labels[pos] = gt_cls[assigned_idx[pos]]
+            assigned_bb[pos] = gt_box[assigned_idx[pos]]
+
+        center_gt = xy_to_cxcy(assigned_bb)
+        offset_xy = 10.0 * (center_gt[:, :2] - center_anc[:, :2]) / (center_anc[:, 2:] + eps)
+        offset_wh =  5.0 * torch.log((center_gt[:, 2:] / (center_anc[:, 2:] + eps)).clamp(min=eps))
+        offsets = torch.cat([offset_xy, offset_wh], dim=1)
+
+        mask = pos.unsqueeze(1).expand(-1, 4).float()
+
+        batch_offsets.append((offsets * mask).reshape(-1))
+        batch_masks.append(mask.reshape(-1))
+        batch_cls.append(cls_labels)
+
+    bbox_offset = torch.stack(batch_offsets)
+    bbox_mask   = torch.stack(batch_masks)
+    cls_labels  = torch.stack(batch_cls)
     return [bbox_offset, bbox_mask, cls_labels]
 
 
@@ -991,6 +1172,12 @@ def MultiBoxDetection(cls_prob, loc_pred, anchor, nms_threshold = 0.5):
         每个锚框信息由[class_id, confidence, xmin, ymin, xmax, ymax]表示
         class_id=-1 表示背景或在非极大值抑制中被移除了
     """
+    # ********************************************************************************
+    # 新书代码上其实有些坑，例如MultiBoxDetection偏移量编码用了log解码却没exp
+    # 所以后面multibox_detection用原书的
+    # 新书的MultiBoxDetection可以用作理解
+    # ********************************************************************************
+
     assert len(cls_prob.shape) == 3 and len(loc_pred.shape) == 2 and len(anchor.shape) == 3
     bn = cls_prob.shape[0]
     
@@ -1213,11 +1400,159 @@ def load_data_bananas(batch_size):
 
     Defined in :numref:`sec_object-detection-dataset`"""
     train_iter = torch.utils.data.DataLoader(BananasDataset(is_train=True),
-                                             batch_size, shuffle=True)
+                                             batch_size, shuffle=True, num_workers=0, pin_memory=True)
+                                            # , persistent_workers=True
     val_iter = torch.utils.data.DataLoader(BananasDataset(is_train=False),
-                                           batch_size)
+                                           batch_size, num_workers=0, pin_memory=True)
+                                            # , persistent_workers=True
     return train_iter, val_iter
 
+# ################################# 9.7 #########################
+
+def set_axes(axes, xlabel, ylabel, xlim, ylim, xscale, yscale, legend):
+    """设置matplotlib的轴
+
+    Defined in :numref:`sec_calculus`"""
+    axes.set_xlabel(xlabel)
+    axes.set_ylabel(ylabel)
+    axes.set_xscale(xscale)
+    axes.set_yscale(yscale)
+    axes.set_xlim(xlim)
+    axes.set_ylim(ylim)
+    if legend:
+        axes.legend(legend)
+    axes.grid()
+
+from matplotlib.ticker import MultipleLocator, FormatStrFormatter
+
+class Animator:
+    """在动画中绘制数据"""
+    def __init__(self, xlabel=None, ylabel=None, legend=None, xlim=None,
+                 ylim=None, xscale='linear', yscale='linear',
+                 fmts=('-', 'm--', 'g-.', 'r:'), nrows=1, ncols=1,
+                 figsize=(7, 4)):
+        """Defined in :numref:`sec_softmax_scratch`"""
+        # 增量地绘制多条线
+        if legend is None:
+            legend = []
+        use_svg_display()
+        self.fig, self.axes = plt.subplots(nrows, ncols, figsize=figsize)
+        if nrows * ncols == 1:
+            self.axes = [self.axes, ]
+        # 使用lambda函数捕获参数
+        self.config_axes = lambda: set_axes(
+            self.axes[0], xlabel, ylabel, xlim, ylim, xscale, yscale, legend)
+        self.X, self.Y, self.fmts = None, None, fmts
+
+        # 👇 强制 y 轴更多刻度并设置显示格式
+        ax = self.axes[0]
+        ax.yaxis.set_major_locator(MultipleLocator(0.05))  # 0,0.05,0.10,0.15,0.20
+        ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+        self.fig.tight_layout()
+
+    def add(self, x, y):
+        # 向图表中添加多个数据点
+        if not hasattr(y, "__len__"):
+            y = [y]
+        n = len(y)
+        if not hasattr(x, "__len__"):
+            x = [x] * n
+        if not self.X:
+            self.X = [[] for _ in range(n)]
+        if not self.Y:
+            self.Y = [[] for _ in range(n)]
+        for i, (a, b) in enumerate(zip(x, y)):
+            if a is not None and b is not None:
+                self.X[i].append(a)
+                self.Y[i].append(b)
+        self.axes[0].cla()
+        for x_i, y_i, fmt in zip(self.X, self.Y, self.fmts):
+            self.axes[0].plot(x_i, y_i, fmt, linewidth=1.5)
+        self.config_axes()
+        # 追加一次，确保每次刷新后刻度依旧
+        from matplotlib.ticker import MultipleLocator, FormatStrFormatter
+        ax = self.axes[0]
+        ax.yaxis.set_major_locator(MultipleLocator(0.05))
+        ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+        self.fig.tight_layout()
+        display.display(self.fig)
+        # display.clear_output(wait=True)
+
+class Accumulator:
+    """在n个变量上累加"""
+    def __init__(self, n):
+        """Defined in :numref:`sec_softmax_scratch`"""
+        self.data = [0.0] * n
+
+    def add(self, *args):
+        self.data = [a + float(b) for a, b in zip(self.data, args)]
+
+    def reset(self):
+        self.data = [0.0] * len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+def offset_inverse(anchors, offset_preds):
+    """根据带有预测偏移量的锚框来预测边界框
+
+    Defined in :numref:`subsec_labeling-anchor-boxes`"""
+    anc = box_corner_to_center(anchors)
+    pred_bbox_xy = (offset_preds[:, :2] * anc[:, 2:] / 10) + anc[:, :2]
+    pred_bbox_wh = torch.exp(offset_preds[:, 2:] / 5) * anc[:, 2:]
+    pred_bbox = torch.cat((pred_bbox_xy, pred_bbox_wh), axis=1)
+    predicted_bbox = box_center_to_corner(pred_bbox)
+    return predicted_bbox
+
+def nms(boxes, scores, iou_threshold):
+    """对预测边界框的置信度进行排序
+
+    Defined in :numref:`subsec_predicting-bounding-boxes-nms`"""
+    B = torch.argsort(scores, dim=-1, descending=True)
+    keep = []  # 保留预测边界框的指标
+    while B.numel() > 0:
+        i = B[0]
+        keep.append(i)
+        if B.numel() == 1: break
+        iou = box_iou(boxes[i, :].reshape(-1, 4),
+                      boxes[B[1:], :].reshape(-1, 4)).reshape(-1)
+        inds = torch.nonzero(iou <= iou_threshold).reshape(-1)
+        B = B[inds + 1]
+    return torch.tensor(keep, device=boxes.device)
+
+def multibox_detection(cls_probs, offset_preds, anchors, nms_threshold=0.5,
+                       pos_threshold=0.009999999):
+    """使用非极大值抑制来预测边界框
+
+    Defined in :numref:`subsec_predicting-bounding-boxes-nms`"""
+    device, batch_size = cls_probs.device, cls_probs.shape[0]
+    anchors = anchors.squeeze(0)
+    num_classes, num_anchors = cls_probs.shape[1], cls_probs.shape[2]
+    out = []
+    for i in range(batch_size):
+        cls_prob, offset_pred = cls_probs[i], offset_preds[i].reshape(-1, 4)
+        conf, class_id = torch.max(cls_prob[1:], 0)
+        predicted_bb = offset_inverse(anchors, offset_pred)
+        keep = nms(predicted_bb, conf, nms_threshold)
+
+        # 找到所有的non_keep索引，并将类设置为背景
+        all_idx = torch.arange(num_anchors, dtype=torch.long, device=device)
+        combined = torch.cat((keep, all_idx))
+        uniques, counts = combined.unique(return_counts=True)
+        non_keep = uniques[counts == 1]
+        all_id_sorted = torch.cat((keep, non_keep))
+        class_id[non_keep] = -1
+        class_id = class_id[all_id_sorted]
+        conf, predicted_bb = conf[all_id_sorted], predicted_bb[all_id_sorted]
+        # pos_threshold是一个用于非背景预测的阈值
+        below_min_idx = (conf < pos_threshold)
+        class_id[below_min_idx] = -1
+        conf[below_min_idx] = 1 - conf[below_min_idx]
+        pred_info = torch.cat((class_id.unsqueeze(1),
+                               conf.unsqueeze(1),
+                               predicted_bb), dim=1)
+        out.append(pred_info)
+    return torch.stack(out)
 
 # ################################# 9.9 #########################
 def read_voc_images(root="../../data/VOCdevkit/VOC2012", 
