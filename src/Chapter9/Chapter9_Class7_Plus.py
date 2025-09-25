@@ -411,7 +411,7 @@ plt.imshow(img)
 h, w = img.shape[0:2]
 for row in output:
     score = float(row[1])
-    if score < 0.3:
+    if score < 0.9:
         continue
     # 保证两个张量在同一设备
     scale = torch.tensor((w, h, w, h), device=row.device)
