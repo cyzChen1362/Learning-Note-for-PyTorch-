@@ -248,7 +248,7 @@ print('output bbox preds:', bbox_preds.shape)
 # 读取数据集和初始化
 # ========================
 
-batch_size = 256
+batch_size = 32
 train_iter, _ = d2l.load_data_bananas(batch_size)
 
 net = TinySSD(num_classes=1)
