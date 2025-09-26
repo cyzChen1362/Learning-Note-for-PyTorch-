@@ -779,42 +779,71 @@ def MultiBoxPrior(feature_map, sizes=[0.75, 0.5, 0.25], ratios=[1, 2, 0.5]):
     
     return torch.tensor(anchors, dtype=torch.float32).view(1, -1, 4)
 
-# 这里我直接把MultiBoxPrior换成新的Torch版
+# 这里我直接把MultiBoxPrior换成新的GPU版
 
-def MultiBoxPrior_torch(feature_map, sizes=[0.75, 0.5, 0.25], ratios=[1, 2, 0.5]):
-    """
-    纯 torch + GPU 版 MultiBoxPrior
+def MultiBoxPrior_GPU(feature_map, sizes=[0.75, 0.5, 0.25], ratios=[1, 2, 0.5]):
+    r"""
+    按照「9.4.1. 生成多个锚框」所讲的实现, anchor表示成(xmin, ymin, xmax, ymax).
+    https://zh.d2l.ai/chapter_computer-vision/anchor.html
+    跟原版除了用GPU和tensor规避numpy之外基本没有不同
     Args:
-        feature_map: torch.Tensor, shape [N, C, H, W]
-        sizes:  List[float]  0~1
-        ratios: List[float]
+        feature_map: torch tensor, Shape: [N, C, H, W].
+        sizes: List of sizes (0~1) of generated MultiBoxPriores.
+        ratios: List of aspect ratios (non-negative) of generated MultiBoxPriores.
     Returns:
-        anchors: torch.Tensor, shape (1, num_anchors, 4)
-                 已与 feature_map 在同一 device
+        anchors of shape (1, num_anchors, 4). 由于batch里每个都一样, 所以第一维为1
     """
     device = feature_map.device
     dtype  = feature_map.dtype
 
-    # ---- 生成 base_anchors (num_sizes* num_ratios, 4) ----
-    pairs = []
+    pairs = [] # pair of (size, sqrt(ration))
+    # 只对包含s1或r1的大小与宽高比的组合感兴趣
     for r in ratios:
         pairs.append((sizes[0], math.sqrt(r)))
     for s in sizes[1:]:
         pairs.append((s, math.sqrt(ratios[0])))
 
-    pairs = torch.tensor(pairs, dtype=dtype, device=device)      # (k, 2)
+    # 将嵌套列表转为torch.tensor，才有“所有行的第一列”
+    # 总长度为n+m-1
+    pairs = torch.tensor(pairs, dtype=dtype, device=device)      # (n+m-1, 2)
+
+    # 宽系数
     ss1 = pairs[:, 0] * pairs[:, 1]                              # size * sqrt(r)
+    # 高系数
     ss2 = pairs[:, 0] / pairs[:, 1]                              # size / sqrt(r)
+
+    # 生成形如 [xmin, ymin, xmax, ymax] 的二维数组，n+m-1行，4列
+    # 这些坐标是相对于中心点的半宽半高，宽系数 0.5 → 左右坐标 ±0.25
     base_anchors = torch.stack([-ss1, -ss2, ss1, ss2], dim=1)    # (k, 4)
     base_anchors = base_anchors / 2.0
 
-    # ---- 平移到 feature_map 的每个 cell ----
+    # 取出倒数两个维度的大小
     h, w = feature_map.shape[-2:]
-    # range(0, w)/w 以及 range(0, h)/h
+    # 横向锚框中心点坐标(归一化到0~1)
     shifts_x = torch.arange(w, dtype=dtype, device=device) / w
+    # 纵向锚框中心点坐标(归一化到0~1)
     shifts_y = torch.arange(h, dtype=dtype, device=device) / h
+
+    # shift_x：每一行都复制 shifts_x，表示每个网格点的横坐标
+    # [[0, 1/w, 2/w, ...],
+    #  [0, 1/w, 2/w, ...],
+    #  ...
+    # ]
+    # shift_y：每一列都复制 shifts_y，表示每个网格点的纵坐标
+    # [[0, 0, 0, ...],
+    #  [1/h, 1/h, 1/h, ...],
+    #  ...
+    # ]
     shift_y, shift_x = torch.meshgrid(shifts_y, shifts_x, indexing="ij")  # (h,w)
-    # [h*w, 4] -> (x, y, x, y)
+
+    # 拉平成一维，[h*w, 4] -> (x, y, x, y)
+    # 然后把 (x, y) 复制成 [x, y, x, y]
+    # → 行
+    # ↓ 列  [[0  , 1/w, 2/w, ... , 0  , 1/w, 2/w, ...],
+    #        [0  , 0  , 0  , ... , 1/h, 1/h, 1/h, ...],
+    #        [0  , 1/w, 2/w, ... , 0  , 1/w, 2/w, ...],
+    #        [0  , 0  , 0  , ... , 1/h, 1/h, 1/h, ...],
+    #       ]
     shifts = torch.stack([
         shift_x.reshape(-1),
         shift_y.reshape(-1),
@@ -822,7 +851,23 @@ def MultiBoxPrior_torch(feature_map, sizes=[0.75, 0.5, 0.25], ratios=[1, 2, 0.5]
         shift_y.reshape(-1)
     ], dim=1)
 
-    # ---- 广播相加得到最终 anchors ----
+    # 广播相加得到最终 anchors
+    # 等价于 anchors = shifts.reshape((-1, 1, 4)) + base_anchors.reshape((1, -1, 4))
+    # shifts.reshape：行数仍然是h*w，第三维仍然是4，新增了1个第二维
+    # 也就是shifts.reshape是(h*w,1,4)，base_anchors.reshape是(1,n+m-1,4)
+    # 就能广播机制了
+    # 生成的anchors是(h*w,n+m-1,4)
+    # anchors的每一行都对应着同一个中心坐标，
+    # 这一行的每一列都代表着一种不同的锚框大小，
+    # 第三维4个通道说明每个中心坐标的每种锚框都由四个坐标点构成
+    # 当然以上全是归一化的形式
+    # 以及，这里当然是加法而不是惩罚（没错，就是在你认为的广播机制条件下）
+    # 因为shifts的某一行是一个特征图上某个像素位置对应到原图的归一化中心点坐标 [cx, cy, cx, cy]
+    # base_anchors的每一行则是某个归一化中心点的归一化偏移量
+    # 总偏移后坐标 = （宽or高） * （归一化中心点 + 归一化偏移量）
+    # 或者更形象来说，这里计算的偏移量是s√r和s/√r，而总偏移量是ws√r和hs/√r
+    # 刚好总中心点是wcx和hcy，这里的shifts和base_anchors都提取出来了w和h项
+
     anchors = shifts[:, None, :] + base_anchors[None, :, :]      # (h*w, k, 4)
     anchors = anchors.reshape(1, -1, 4)                          # (1, h*w*k, 4)
     return anchors
@@ -1053,21 +1098,22 @@ def MultiBoxTarget_fast(anchor, label, jaccard_threshold=0.5, eps=1e-6):
     """
     更快的 MultiBoxTarget_fast 实现：
     使用 torchvision.ops.box_iou 替代 Python 循环，大幅减少 CPU 端开销。
+    其余没变，只是改了一下代码写法
 
     Args:
-        anchor: torch.Tensor, 形状 (1, A, 4)，归一化 [xmin, ymin, xmax, ymax]
-        label:  torch.Tensor, 形状 (B, M, 5)，每行 [class, xmin, ymin, xmax, ymax]
-                没有真实框的行可填 -1
+        anchor: torch tensor, 输入的锚框, 一般是通过MultiBoxPrior生成, shape:（1，锚框总数，4）
+        label: 真实标签, shape为(bn, 每张图片最多的真实锚框数, 5)
+               第二维中，如果给定图片没有这么多锚框, 可以先用-1填充空白, 最后一维中的元素为[类别标签, 四个坐标值]
     Returns:
-        [bbox_offset, bbox_mask, cls_labels]
-          bbox_offset: (B, A*4)
-          bbox_mask:   (B, A*4)
-          cls_labels:  (B, A)   0 表示背景
+        列表, [bbox_offset, bbox_mask, cls_labels]
+        bbox_offset: 每个锚框的标注偏移量，形状为(bn，锚框总数*4)
+        bbox_mask: 形状同bbox_offset, 每个锚框的掩码, 一一对应上面的偏移量, 负类锚框(背景)对应的掩码均为0, 正类锚框的掩码均为1
+        cls_labels: 每个锚框的标注类别, 其中0表示为背景, 形状为(bn，锚框总数)
     """
     assert anchor.ndim == 3 and label.ndim == 3
     device = anchor.device
     A = anchor.size(1)              # 锚框数
-    anc = anchor[0]                 # (A, 4)
+    anc = anchor[0]                 # 所有锚框的坐标(A, 4)
     center_anc = xy_to_cxcy(anc)
 
     batch_offsets, batch_masks, batch_cls = [], [], []
@@ -1086,40 +1132,67 @@ def MultiBoxTarget_fast(anchor, label, jaccard_threshold=0.5, eps=1e-6):
             continue
 
         gt_cls = lab[:, 0].long() + 1               # 正类从1开始
-        gt_box = lab[:, 1:5]
+        gt_box = lab[:, 1:5]  # 真实框坐标
 
-        # IoU 计算 (A, G)
+        # 其实这段代码和新书代码的逻辑是完全一样的，只是有点绕
+
+        # 新书的逻辑是先为box分配anchor，
+        # 然后剩余的anchor，看看和它最匹配的box是否符合阈值，符合就分配
+
+        # 原书新代码的逻辑是先为anchor分配box，同时要符合阈值
+        # 然后剩余的box再去分配anchor，并且可能覆盖之前的结果
+
+        # 也就是说，这两种代码的逻辑都是box分配anchor的优先级最高
+        # 然后anchor分配box的优先级次之，并且要符合逻辑
+        # 新书的代码是在逻辑上确定优先级，旧书的新代码是以之后的结果能覆盖之前的结果确定优先级
+
+        # IoU 计算 (A, G)，返回[N, M] 的张量，
+        # 第 i 行、第 j 列元素表示 boxes1[i] 与 boxes2[j] 的 IoU
         ious = box_iou(anc, gt_box)
 
         # 先每个 anchor 找 IoU 最大的 GT
+        # best_ious：[A] 每个锚框与所有真实框的最大 IoU。
+        # best_gt：  [A] 给出最大 IoU 对应的真实框索引。
         best_ious, best_gt = ious.max(dim=1)
         assigned_idx = torch.full((A,), -1, dtype=torch.long, device=device)
+        # 生成布尔张量 [A]，对于 IoU 大于等于阈值的锚框，对应位置为 True（认为是正样本）
         pos = best_ious >= jaccard_threshold
+        # 把正样本锚框的位置替换为它们匹配到的真实框索引
         assigned_idx[pos] = best_gt[pos]
 
         # 保证每个 GT 至少分到一个 anchor
         best_anchor = ious.argmax(dim=0)
+        # 例如这里bast_anchor是[2 0 1]，然后torch.arange返回是[0 1 2]
+        # 那么就是assigned_idx[2]=0, assigned_idx[0]=1, assigned_idx[1]=2
         assigned_idx[best_anchor] = torch.arange(gt_box.size(0), device=device)
 
         # 构造标签和偏移
         cls_labels = torch.zeros(A, dtype=torch.long, device=device)
         assigned_bb = torch.zeros(A, 4, device=device)
+        # 这里的pos是长为A的布尔变量
         pos = assigned_idx >= 0
         if pos.any():
             cls_labels[pos] = gt_cls[assigned_idx[pos]]
             assigned_bb[pos] = gt_box[assigned_idx[pos]]
 
         center_gt = xy_to_cxcy(assigned_bb)
+        # 这里的公式见书本
+        # 当然，书本是写了四项，这里是x y 两项算一次，w h 两项算一次，所以只有两条式子
+        # 这里算x y偏移量
         offset_xy = 10.0 * (center_gt[:, :2] - center_anc[:, :2]) / (center_anc[:, 2:] + eps)
+        # 同理，这里算w h偏移量，除以0.1标准差就是乘以10
         offset_wh =  5.0 * torch.log((center_gt[:, 2:] / (center_anc[:, 2:] + eps)).clamp(min=eps))
+        # 拼起来；如果都没有分配锚框那就没有偏移量，掩码覆盖为0
         offsets = torch.cat([offset_xy, offset_wh], dim=1)
-
+        # -1 表示保持原来的 N 不变，4 表示复制到 4 列
         mask = pos.unsqueeze(1).expand(-1, 4).float()
 
         batch_offsets.append((offsets * mask).reshape(-1))
         batch_masks.append(mask.reshape(-1))
         batch_cls.append(cls_labels)
 
+    # 原先是一个Python list
+    # 现在在新的第一维把这些小张量“堆叠”起来，形成(bn, N*4)的单个 torch.Tensor
     bbox_offset = torch.stack(batch_offsets)
     bbox_mask   = torch.stack(batch_masks)
     cls_labels  = torch.stack(batch_cls)
@@ -1525,6 +1598,22 @@ def multibox_detection(cls_probs, offset_preds, anchors, nms_threshold=0.5,
     """使用非极大值抑制来预测边界框
 
     Defined in :numref:`subsec_predicting-bounding-boxes-nms`"""
+
+    """
+        # 按照「9.4.1. 生成多个锚框」所讲的实现, anchor表示成归一化(xmin, ymin, xmax, ymax).
+        https://zh.d2l.ai/chapter_computer-vision/anchor.html
+        Args:
+            cls_prob: 经过softmax后得到的各个锚框的预测概率, shape:(bn, 预测总类别数+1, 锚框个数)
+            offset_preds: 预测的各个锚框的偏移量, shape:(bn, 锚框个数*4)，回忆一下书本里的偏移量，就是4个参数
+            anchor: MultiBoxPrior输出的默认锚框, shape: (1, 锚框个数, 4)
+            nms_threshold: 非极大抑制中的阈值
+            pos_threshold: 非背景预测的阈值
+        Returns:
+            所有锚框的信息, shape: (bn, 锚框个数, 6)
+            每个锚框信息由[class_id, confidence, xmin, ymin, xmax, ymax]表示
+            class_id=-1 表示背景或在非极大值抑制中被移除了
+        """
+
     device, batch_size = cls_probs.device, cls_probs.shape[0]
     anchors = anchors.squeeze(0)
     num_classes, num_anchors = cls_probs.shape[1], cls_probs.shape[2]
