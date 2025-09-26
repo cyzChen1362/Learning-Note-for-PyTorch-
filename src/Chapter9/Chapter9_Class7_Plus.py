@@ -465,8 +465,14 @@ def predict(X):
     anchors, cls_preds, bbox_preds = net(X.to(device))
     # 对最后一维（类别维度）做 softmax，得到每个 anchor 的类别概率
     cls_probs = F.softmax(cls_preds, dim=2).permute(0, 2, 1)
+    # output 形状 (batch_size, num_anchors, 6)
     output = d2l.multibox_detection(cls_probs, bbox_preds, anchors)
+    # 预测通常一次只处理一张图片，所以取 output[0]，其形状(num_anchors, 6)
+    # i：该锚框在这一批图片里的索引
+    # row：长度为 6 的张量，对应上面那六个值，row[0] 是 class_id
     idx = [i for i, row in enumerate(output[0]) if row[0] != -1]
+    # output[0, idx] 的形状 (len(idx), 6)
+    # 即当前图片中通过 NMS 和阈值筛选的有效目标框
     return output[0, idx]
 
 output = predict(X)

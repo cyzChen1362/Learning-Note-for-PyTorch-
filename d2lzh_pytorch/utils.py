@@ -1579,67 +1579,95 @@ def offset_inverse(anchors, offset_preds):
 
 def nms(boxes, scores, iou_threshold):
     """对预测边界框的置信度进行排序
-
-    Defined in :numref:`subsec_predicting-bounding-boxes-nms`"""
-    B = torch.argsort(scores, dim=-1, descending=True)
+        Defined in :numref:`subsec_predicting-bounding-boxes-nms`
+        Args:
+            boxes: 各预测框的坐标
+            scores: 各个框的预测概率（对了，交并比可不是预测概率）
+            iou_threshold: 顾名思义
+        Returns:
+            所有锚框的信息, shape: (bn, 锚框个数, 6)
+        """
+    # 按置信度从高到低排序
+    B = torch.argsort(scores, dim=-1, descending=True) # 类似于tensor([2, 0, 1, ...])
     keep = []  # 保留预测边界框的指标
     while B.numel() > 0:
+        # 最高分框索引
         i = B[0]
         keep.append(i)
         if B.numel() == 1: break
+        # 这里并没有最高分框和自己IoU哈，看清楚一点代码
         iou = box_iou(boxes[i, :].reshape(-1, 4),
                       boxes[B[1:], :].reshape(-1, 4)).reshape(-1)
+        # 这里iou的第0个元素是原本B的第1个元素了，所以后面才会+1
+        # torch.nonzero(...)：[True, False, True] → tensor([[0],[2]])
         inds = torch.nonzero(iou <= iou_threshold).reshape(-1)
         B = B[inds + 1]
     return torch.tensor(keep, device=boxes.device)
 
 def multibox_detection(cls_probs, offset_preds, anchors, nms_threshold=0.5,
                        pos_threshold=0.009999999):
-    """使用非极大值抑制来预测边界框
-
-    Defined in :numref:`subsec_predicting-bounding-boxes-nms`"""
-
     """
-        # 按照「9.4.1. 生成多个锚框」所讲的实现, anchor表示成归一化(xmin, ymin, xmax, ymax).
+    使用非极大值抑制来预测边界框
+    注：这个代码其实并没有真正区分多类别，原书也没有真正区分
+    可能后面多类别分类任务会先分开类别再搞，但我还是喜欢改detection代码......
+    # 按照「9.4.1. 生成多个锚框」所讲的实现, anchor表示成归一化(xmin, ymin, xmax, ymax).
         https://zh.d2l.ai/chapter_computer-vision/anchor.html
         Args:
-            cls_prob: 经过softmax后得到的各个锚框的预测概率, shape:(bn, 预测总类别数+1, 锚框个数)
-            offset_preds: 预测的各个锚框的偏移量, shape:(bn, 锚框个数*4)，回忆一下书本里的偏移量，就是4个参数
-            anchor: MultiBoxPrior输出的默认锚框, shape: (1, 锚框个数, 4)
+            cls_prob: 经过softmax后得到的各个锚框的预测概率, shape:[N, total_anchors, num_classes+1]
+            offset_preds: 预测的各个锚框的偏移量, shape:[N, total_anchors * 4]，回忆一下书本里的偏移量，就是4个参数
+            anchor: MultiBoxPrior输出的默认锚框, shape: [1, total_anchors, 4]
             nms_threshold: 非极大抑制中的阈值
             pos_threshold: 非背景预测的阈值
         Returns:
-            所有锚框的信息, shape: (bn, 锚框个数, 6)
-            每个锚框信息由[class_id, confidence, xmin, ymin, xmax, ymax]表示
-            class_id=-1 表示背景或在非极大值抑制中被移除了
+            output(batch_size, num_anchors, 6)
+
         """
+    # 非极大值抑制的原理看新书
 
     device, batch_size = cls_probs.device, cls_probs.shape[0]
     anchors = anchors.squeeze(0)
     num_classes, num_anchors = cls_probs.shape[1], cls_probs.shape[2]
     out = []
     for i in range(batch_size):
+        # cls_prob:[total_anchors, num_classes+1]
+        # offset_pred:[total_anchors, 4]
         cls_prob, offset_pred = cls_probs[i], offset_preds[i].reshape(-1, 4)
+        # 在第 0 维度上取最大，也就是在所有类别（不包括背景）之间找一个最大值
+        # 如果是torch.max(cls_prob[:], 0)，连背景都包括了，那就是预测背景了
+        # conf：最大值； class_id：类别索引（从0开始）
         conf, class_id = torch.max(cls_prob[1:], 0)
+        # 预测框：锚框+偏差
         predicted_bb = offset_inverse(anchors, offset_pred)
+        # 返回一列索引序列，类似于[2, 1, 6, ...]
         keep = nms(predicted_bb, conf, nms_threshold)
 
         # 找到所有的non_keep索引，并将类设置为背景
         all_idx = torch.arange(num_anchors, dtype=torch.long, device=device)
         combined = torch.cat((keep, all_idx))
+        # unique(return_counts=True)：
+        # uniques：所有索引不重复地列一遍
+        # counts ：每个索引出现的次数
         uniques, counts = combined.unique(return_counts=True)
+        # 只出现了一次的必然是被NMS筛下去的锚框
         non_keep = uniques[counts == 1]
+        # 先保留框，再接上被去掉的框
         all_id_sorted = torch.cat((keep, non_keep))
+        # 被NMS筛下去的锚框分类为背景
         class_id[non_keep] = -1
+        # 重新排列，保证一致
         class_id = class_id[all_id_sorted]
         conf, predicted_bb = conf[all_id_sorted], predicted_bb[all_id_sorted]
         # pos_threshold是一个用于非背景预测的阈值
+        # 主要是某些确实通过NMS了，但conf很低的，也去掉吧，返回布尔列向量
         below_min_idx = (conf < pos_threshold)
         class_id[below_min_idx] = -1
+        # 既然某类的conf低，反过来就是背景的conf高
         conf[below_min_idx] = 1 - conf[below_min_idx]
+        # pred_info：[num_anchors, 6]
         pred_info = torch.cat((class_id.unsqueeze(1),
                                conf.unsqueeze(1),
                                predicted_bb), dim=1)
+        # 按每张图片append
         out.append(pred_info)
     return torch.stack(out)
 
