@@ -2,26 +2,36 @@
 
 ## 📚 项目简介
 本仓库记录了我在学习 **《动手学深度学习 (Dive into Deep Learning)》** 过程中，  
-在 [ShusenTang/Dive-into-DL-PyTorch](https://github.com/ShusenTang/Dive-into-DL-PyTorch)  
+在 [ShusenTang/Dive-into-DL-PyTorch](https://github.com/ShusenTang/Dive-into-DL-PyTorch) 和 [d2l-ai/d2l-zh](https://github.com/d2l-ai/d2l-zh)   
 开源实现的基础上，**添加个人理解、注释与实验** 的学习笔记与代码。
 
 目标：
-- 熟悉 **PyTorch** 框架下的深度学习基础与经典模型实现  
-- 通过逐行注释和实验，巩固书中理论与实践
-- 新书第九章计算机视觉，作者好多坑，甚至直接numpy而不tensor算起来慢得要死，  
-- 于是猛猛修代码😒代码修理和调试能力得到极大提升😑
+- 熟悉 **PyTorch** 框架下的深度学习基础与经典模型实现，通过逐行注释和实验，巩固书中理论与实践
+- 新书第九章计算机视觉，作者好多坑，于是猛猛修代码😒代码修理和调试能力得到极大提升😑
+- d2lzh_pytorch/utils.py库全部函数已进行**像素级**注释和部分**修改/添加**
 
 ---
 
 ## 🔧 修改
 - **两本书籍**  
-由于ShusenTang新书中9.6后面有缺失，这里直接参考原书进行学习    
+由于ShusenTang新书中9.6后面有缺失，这里直接参考原书进行学习  
+同时ShusenTang新书没有Transformer内容，这一部分完全参考原书学习
 
 - **两版d2l**   
-同时，两本书的d2l库略有不同，所以这里也对d2l库中，9.1-9.13做了修改  
+同时，两本书的d2l库略有不同，所以这里也对d2l库中，9.1-9.13做了修改，以及Transformer内容的添加  
 修改问题包括**device**，**amp加速**，以及**MultiboxDetection**编码解码不一致的错误等等等等。。。  
 如果第九章出现Error可以翻翻**d2lzh_pytorch/utils.py**  
 图片不显示可以勤加d2l.plt.show()，有些方法里面我禁掉了
+---
+
+## License & Attribution
+本仓库包含以下内容：
+- 个人学习笔记及新增代码：
+- [ShusenTang/Dive-into-DL-PyTorch](https://github.com/ShusenTang/Dive-into-DL-PyTorch)  
+  版权及许可证：Apache-2.0
+- [d2l-ai/d2l-zh](https://github.com/d2l-ai/d2l-zh)  
+  版权及许可证：Apache-2.0
+
 ---
 
 ## 🏗 仓库结构
@@ -62,7 +72,8 @@ LearningNote_Dive-into-DL-PyTorch/
   *Dive into Deep Learning*  [http://www.d2l.ai](http://www.d2l.ai)
 
 - **PyTorch 版本实现**  
-  [ShusenTang/Dive-into-DL-PyTorch](https://github.com/ShusenTang/Dive-into-DL-PyTorch)
+  [ShusenTang/Dive-into-DL-PyTorch](https://github.com/ShusenTang/Dive-into-DL-PyTorch)  
+  [d2l-ai/d2l-zh](https://github.com/d2l-ai/d2l-zh)  
 
 ---
 
@@ -85,9 +96,6 @@ LearningNote_Dive-into-DL-PyTorch/
 
 本仓库代码基于 Apache License 2.0。
 
-其中部分代码引用并修改自
-ShusenTang/Dive-into-DL-PyTorch
-，
 原始 LICENSE 及版权声明已保留。
 
 本项目仅用于个人学习与分享。
