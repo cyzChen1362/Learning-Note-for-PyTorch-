@@ -1363,6 +1363,9 @@ DATA_HUB['banana-detection'] = (
     DATA_URL + 'banana-detection.zip',
     '5de26c8fce5ccdea9f91267273464dc968d20d72')
 
+DATA_HUB['voc2012'] = (DATA_URL + 'VOCtrainval_11-May-2012.tar',
+                           '4e443f8a2eca6b1dac8a6c57641b67dd40621a49')
+
 def download(name, cache_dir=os.path.join('..', 'data')):
     """下载一个DATA_HUB中的文件，返回本地文件名
 
