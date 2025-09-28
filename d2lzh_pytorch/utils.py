@@ -1938,6 +1938,7 @@ class VOCSegDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.features)
 
+
 # 整合所有组件，写成VOC数据集下载函数
 def load_data_voc(batch_size, crop_size,
                   voc_dir=r"D:\LearningDeepLearning\LearningNote_Dive-into-DL-PyTorch\data\VOC2012"):
