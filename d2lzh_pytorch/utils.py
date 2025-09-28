@@ -197,6 +197,21 @@ def corr2d(X, K):
 
 
 # ############################ 5.5 #########################
+
+reduce_sum = lambda x, *args, **kwargs: x.sum(*args, **kwargs)
+argmax = lambda x, *args, **kwargs: x.argmax(*args, **kwargs)
+astype = lambda x, *args, **kwargs: x.type(*args, **kwargs)
+size = lambda x, *args, **kwargs: x.numel(*args, **kwargs)
+
+def accuracy(y_hat, y):
+    """计算预测正确的数量
+
+    Defined in :numref:`sec_softmax_scratch`"""
+    if len(y_hat.shape) > 1 and y_hat.shape[1] > 1:
+        y_hat = argmax(y_hat, axis=1)
+    cmp = astype(y_hat, y.dtype) == y
+    return float(reduce_sum(astype(cmp, y.dtype)))
+
 def evaluate_accuracy(data_iter, net, device=None):
     if device is None and isinstance(net, torch.nn.Module):
         # 如果没指定device就使用net的device
@@ -216,6 +231,27 @@ def evaluate_accuracy(data_iter, net, device=None):
                     acc_sum += (net(X).argmax(dim=1) == y).float().sum().item() 
             n += y.shape[0]
     return acc_sum / n
+
+def evaluate_accuracy_gpu(net, data_iter, device=None):
+    """使用GPU计算模型在数据集上的精度
+
+    Defined in :numref:`sec_lenet`"""
+    if isinstance(net, nn.Module):
+        net.eval()  # 设置为评估模式
+        if not device:
+            device = next(iter(net.parameters())).device
+    # 正确预测的数量，总预测的数量
+    metric = Accumulator(2)
+    with torch.no_grad():
+        for X, y in data_iter:
+            if isinstance(X, list):
+                # BERT微调所需的（之后将介绍）
+                X = [x.to(device) for x in X]
+            else:
+                X = X.to(device)
+            y = y.to(device)
+            metric.add(accuracy(net(X), y), size(y))
+    return metric[0] / metric[1]
 
 def train_ch5(net, train_iter, test_iter, batch_size, optimizer, device, num_epochs):
     net = net.to(device)
@@ -1732,7 +1768,7 @@ class VOCSegDataset_old(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.features)
 
-# ############################# 9.95 ##########################
+# ############################# 9.9.5 ##########################
 def read_voc_images(voc_dir = r"D:\LearningDeepLearning\LearningNote_Dive-into-DL-PyTorch\data\VOC2012"
                     ,is_train=True):
     """
@@ -1941,6 +1977,85 @@ def load_data_voc(batch_size, crop_size,
         num_workers=num_workers
     )
     return train_iter, test_iter
+
+# ############################# 9.11 ##########################
+
+def train_batch_ch13(net, X, y, loss, trainer, device):
+    """用多GPU进行小批量训练
+
+    Defined in :numref:`sec_image_augmentation`"""
+    if isinstance(X, list):
+        # 微调BERT中所需
+        X = [x.to(device) for x in X]
+    else:
+        X = X.to(device)
+    y = y.to(device)
+
+    net.train()
+    trainer.zero_grad()
+    pred = net(X)
+    l = loss(pred, y)
+    l.sum().backward()
+    trainer.step()
+
+    # 这里返回的loss是sum起来的，所以后面会有一个metric[0] / metric[2]
+    train_loss_sum = l.sum()
+    train_acc_sum = accuracy(pred, y)
+    return train_loss_sum, train_acc_sum
+
+def train_ch13(net, train_iter, test_iter, loss, trainer, num_epochs,
+               device):
+    """用单一GPU进行模型训练
+        因为老子没有多GPU
+
+    Defined in :numref:`sec_image_augmentation`"""
+    # 使用 time 记录总时长
+    total_time = 0.0
+
+    # 记录曲线
+    epochs, train_loss_list, train_acc_list, test_acc_list = [], [], [], []
+
+    # 直接把模型搬到单个 device
+    net = net.to(device)
+
+    for epoch in range(num_epochs):
+        # 4个维度：储存训练损失，训练准确度，实例数，特点数
+        metric = Accumulator(4)
+        for i, (features, labels) in enumerate(train_iter):
+            start_t = time.perf_counter()
+            l, acc = train_batch_ch13(
+                net, features, labels, loss, trainer, device)
+            metric.add(l, acc, labels.shape[0], labels.numel())
+            total_time += time.perf_counter() - start_t
+
+        test_acc = evaluate_accuracy_gpu(net, test_iter, device)
+
+        # 记录本轮结果
+        epochs.append(epoch + 1)
+        train_loss_list.append(metric[0] / metric[2])
+        train_acc_list.append(metric[1] / metric[3])
+        test_acc_list.append(test_acc)
+
+        print(f'Epoch {epoch + 1}: '
+              f'loss {metric[0] / metric[2]:.3f}, '
+              f'train acc {metric[1] / metric[3]:.3f}, '
+              f'test acc {test_acc:.3f}')
+
+    print(f'{metric[2] * num_epochs / total_time:.1f} examples/sec on {device}')
+
+    # ===== 用 matplotlib 画图 =====
+    plt.figure(figsize=(8, 5))
+    plt.plot(epochs, train_loss_list, label='Train Loss')
+    plt.plot(epochs, train_acc_list, label='Train Acc')
+    plt.plot(epochs, test_acc_list, label='Test Acc')
+    plt.xlabel('Epoch')
+    plt.ylabel('Value')
+    plt.title('Training Curve')
+    plt.xlim(1, num_epochs)
+    plt.ylim(0, 1)
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
 # ############################# 10.7 ##########################
 def read_imdb(folder='train', data_root="/S1/CSCL/tangss/Datasets/aclImdb"): 
