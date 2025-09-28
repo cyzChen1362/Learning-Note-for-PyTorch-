@@ -2003,6 +2003,7 @@ def train_batch_ch13(net, X, y, loss, trainer, device):
     train_acc_sum = accuracy(pred, y)
     return train_loss_sum, train_acc_sum
 
+
 def train_ch13(net, train_iter, test_iter, loss, trainer, num_epochs,
                device):
     """用单一GPU进行模型训练
