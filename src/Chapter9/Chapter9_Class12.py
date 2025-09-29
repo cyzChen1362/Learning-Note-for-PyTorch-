@@ -147,12 +147,30 @@ def extract_features(X, content_layers, style_layers):
 
 # 函数如其名，不必解释
 def get_contents(image_shape, device):
+    """
+        内容图像特征函数
+        Args:
+            image_shape:图片形状
+            device:设备
+        Return:
+            content_X:内容图像
+            contents_Y:内容图像的内容特征
+        """
     content_X = preprocess(content_img, image_shape).to(device)
     contents_Y, _ = extract_features(content_X, content_layers, style_layers)
     return content_X, contents_Y
 
 # 函数如其名，不必解释
 def get_styles(image_shape, device):
+    """
+        样式图像特征函数
+        Args:
+            image_shape:图片形状
+            device:设备
+        Return:
+            style_X:样式图像
+            styles_Y:样式图像的样式特征
+        """
     style_X = preprocess(style_img, image_shape).to(device)
     _, styles_Y = extract_features(style_X, content_layers, style_layers)
     return style_X, styles_Y
@@ -163,29 +181,72 @@ def get_styles(image_shape, device):
 
 # 内容损失
 def content_loss(Y_hat, Y):
+    """
+        内容损失函数
+        Args:
+            Y_hat:合成图像内容特征
+            Y:内容图像内容特征
+        Return:
+            content_loss:合成图像内容特征损失
+        """
     # 我们从动态计算梯度的树中分离目标：
     # 这是一个规定的值，而不是一个变量。
     return torch.square(Y_hat - Y.detach()).mean()
 
-# 风格损失，使用Gram 矩阵，数学原理看书，很简单的
+# 风格损失，使用Gram矩阵，数学原理看书，很简单的
 def gram(X):
+    """
+        Gram矩阵计算函数
+        Args:
+            X:输入原始图像
+        Return:
+            gram_X:输入Gram矩阵图像
+        """
     num_channels, n = X.shape[1], X.numel() // X.shape[1]
     X = X.reshape((num_channels, n))
     return torch.matmul(X, X.T) / (num_channels * n)
 
 def style_loss(Y_hat, gram_Y):
+    """
+        风格损失计算函数
+        Args:
+            Y_hat:合成图像样式特征
+            gram_Y:样式图像样式特征gram矩阵
+        Return:
+            style_loss:合成图像内容特征损失
+        """
     return torch.square(gram(Y_hat) - gram_Y.detach()).mean()
 
 # 全变分损失
 def tv_loss(Y_hat):
+    """
+        全变分损失计算函数
+        Args:
+            Y_hat:合成图像
+        Return:
+            tv_loss:合成图像全变分损失
+        """
     return 0.5 * (torch.abs(Y_hat[:, :, 1:, :] - Y_hat[:, :, :-1, :]).mean() +
                   torch.abs(Y_hat[:, :, :, 1:] - Y_hat[:, :, :, :-1]).mean())
 
-# 损失函数
+# 损失函数权重
 content_weight, style_weight, tv_weight = 1, 1e4, 10
 
 def compute_loss(X, contents_Y_hat, styles_Y_hat, contents_Y, styles_Y_gram):
+    """
+        总损失计算函数
+        Args:
+            X:合成图像
+            contents_Y_hat:合成图像的内容特征
+            styles_Y_hat:合成图像的样式特征
+            contents_Y:内容图像的内容特征
+            styles_Y_gram:样式图像的样式特征
+        Return:
+            compute_loss:总损失计算
+        """
     # 分别计算内容损失、风格损失和全变分损失
+    # 这里用zip是因为contents_Y_hat, contents_Y/styles_Y_hat,
+    # styles_Y_gram可能记录的是多个层输出的特征，所以用zip来逐层获取
     contents_l = [content_loss(Y_hat, Y) * content_weight for Y_hat, Y in zip(
         contents_Y_hat, contents_Y)]
     styles_l = [style_loss(Y_hat, Y) * style_weight for Y_hat, Y in zip(
@@ -210,6 +271,18 @@ class SynthesizedImage(nn.Module):
         return self.weight
 
 def get_inits(X, device, lr, styles_Y):
+    """
+        合成图像初始化函数
+        Args:
+            X:放入的初始化图像，这里选择放入内容图像
+            device:设备
+            lr:学习率
+            styles_Y:样式图像的样式特征
+        Return:
+            gen_img():初始化的图像，其为自定义SynthesizedImage类
+            styles_Y_gram：样式图像的的样式特征的Gram矩阵
+            trainer:优化器
+        """
     # 创建可训练图像
     gen_img = SynthesizedImage(X.shape).to(device)
     # 初始化为内容图像
@@ -227,8 +300,23 @@ def get_inits(X, device, lr, styles_Y):
 import matplotlib.pyplot as plt
 
 def train(X, contents_Y, styles_Y, device, lr, num_epochs, lr_decay_epoch):
+    """
+        训练函数
+        Args:
+            X:放入的初始化图像，这里选择放入内容图像
+            contents_Y:内容图像的内容特征
+            styles_Y:样式图像的样式特征
+            device:设备
+            lr:学习率
+            num_epochs:epoch数
+            lr_decay_epoch:每隔几个epoch衰减一次学习率
+        Return:
+            X:训练结束后的合成图像
+        """
     # 初始化
     X, styles_Y_gram, trainer = get_inits(X, device, lr, styles_Y)
+
+    # trainer 配置一个分段学习率调度器，让学习率在训练过程中按照固定步长衰减
     scheduler = torch.optim.lr_scheduler.StepLR(trainer, lr_decay_epoch, 0.8)
 
     # 用列表存储 loss
@@ -236,10 +324,13 @@ def train(X, contents_Y, styles_Y, device, lr, num_epochs, lr_decay_epoch):
 
     for epoch in range(num_epochs):
         trainer.zero_grad()
+        # 合成图像的内容特征和样式特征
         contents_Y_hat, styles_Y_hat = extract_features(
             X, content_layers, style_layers)
+        # 合成图像的内容特征损失、样式特征损失、全变分损失、总损失
         contents_l, styles_l, tv_l, l = compute_loss(
             X, contents_Y_hat, styles_Y_hat, contents_Y, styles_Y_gram)
+        # 更新参数
         l.backward()
         trainer.step()
         scheduler.step()
