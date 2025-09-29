@@ -148,25 +148,25 @@ def bilinear_kernel(in_channels, out_channels, kernel_size):
     return weight
 
 # 构造一个将输入的高和宽放大2倍的转置卷积层，并将其卷积核用bilinear_kernel函数初始化
-conv_trans = nn.ConvTranspose2d(3, 3, kernel_size=4, padding=1, stride=2,
-                                bias=False)
-conv_trans.weight.data.copy_(bilinear_kernel(3, 3, 4));
+# conv_trans = nn.ConvTranspose2d(3, 3, kernel_size=4, padding=1, stride=2,
+#                                 bias=False)
+# conv_trans.weight.data.copy_(bilinear_kernel(3, 3, 4));
 
 # 读取图像X，将上采样的结果记作Y
-img = torchvision.transforms.ToTensor()(d2l.Image.open('../../data/img/catdog.jpg'))
-X = img.unsqueeze(0)
-Y = conv_trans(X)
+# img = torchvision.transforms.ToTensor()(d2l.Image.open('../../data/img/catdog.jpg'))
+# X = img.unsqueeze(0)
+# Y = conv_trans(X)
 
 # 为了打印图像，我们需要调整通道维的位置
-out_img = Y[0].permute(1, 2, 0).detach()
-
-# 打印图像
-d2l.set_figsize()
-print('input image shape:', img.permute(1, 2, 0).shape)
-d2l.plt.imshow(img.permute(1, 2, 0));
-print('output image shape:', out_img.shape)
-d2l.plt.imshow(out_img);
-d2l.plt.show()
+# out_img = Y[0].permute(1, 2, 0).detach()
+#
+# # 打印图像
+# d2l.set_figsize()
+# print('input image shape:', img.permute(1, 2, 0).shape)
+# d2l.plt.imshow(img.permute(1, 2, 0));
+# print('output image shape:', out_img.shape)
+# d2l.plt.imshow(out_img);
+# d2l.plt.show()
 
 # 好的，这里终于设置转置卷积层transpose_conv的参数了
 W = bilinear_kernel(num_classes, num_classes, 64)
