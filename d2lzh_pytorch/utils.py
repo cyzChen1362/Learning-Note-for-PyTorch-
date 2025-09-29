@@ -2058,6 +2058,11 @@ def train_ch13(net, train_iter, test_iter, loss, trainer, num_epochs,
     plt.grid(True)
     plt.show()
 
+# ############################# 9.13 ##########################
+DATA_HUB['cifar10_tiny'] = (DATA_URL + 'kaggle_cifar10_tiny.zip',
+                                '2068874e4b9a9f0fb07ebe0ad2b29754449ccacd')
+
+
 # ############################# 10.7 ##########################
 def read_imdb(folder='train', data_root="/S1/CSCL/tangss/Datasets/aclImdb"): 
     data = []
