@@ -1983,6 +1983,7 @@ def load_data_voc(batch_size, crop_size,
 
 def train_batch_ch13(net, X, y, loss, trainer, device):
     """用多GPU进行小批量训练
+        其实这里改了单gpu因为我没有多gpu
 
     Defined in :numref:`sec_image_augmentation`"""
     if isinstance(X, list):
