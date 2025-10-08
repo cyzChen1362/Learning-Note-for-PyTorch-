@@ -2063,6 +2063,97 @@ def train_ch13(net, train_iter, test_iter, loss, trainer, num_epochs,
 DATA_HUB['cifar10_tiny'] = (DATA_URL + 'kaggle_cifar10_tiny.zip',
                                 '2068874e4b9a9f0fb07ebe0ad2b29754449ccacd')
 
+# 读取trainLabels.csv文件，其格式为一列图片名和一列标签
+def read_csv_labels(fname):
+    """读取fname来给标签字典返回一个文件名"""
+    with open(fname, 'r') as f:
+        # 跳过文件头行(列名)
+        lines = f.readlines()[1:]
+    tokens = [l.rstrip().split(',') for l in lines]
+    return dict(((name, label) for name, label in tokens))
+
+# 复制文件函数，如果有就不复制了
+def copyfile(filename, target_dir):
+    """将文件复制到目标目录，如果已存在则跳过"""
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir, exist_ok=True)
+    target_path = os.path.join(target_dir, os.path.basename(filename))
+    if not os.path.exists(target_path):   # 如果不存在再复制
+        shutil.copy(filename, target_path)
+
+#@save
+def reorg_train_valid(data_dir, labels, valid_ratio):
+    """将验证集从原始的训练集中拆分出来"""
+    # ********************************************************************************
+    # 最终目录结构形如：
+    # train_valid_test/
+    #     train_valid/
+    #         cat/
+    #         dog/
+    #     train/
+    #         cat/
+    #         dog/
+    #     valid/
+    #         cat/
+    #         dog/
+    # ********************************************************************************
+    # 训练数据集中样本最少的类别中的样本数
+    # collections.Counter(labels.values()) 会统计每个类别的样本数量；
+    # .most_common() 按数量从多到少排序
+    n = collections.Counter(labels.values()).most_common()[-1][1]
+    # 验证集中每个类别的样本数，即计算每类验证样本的数量
+    n_valid_per_label = max(1, math.floor(n * valid_ratio))
+    # 用一个字典 label_count 记录每个类别目前已分到验证集的数量
+    label_count = {}
+    for train_file in os.listdir(os.path.join(data_dir, 'train')):
+        # 用 train_file.split('.')[0] 去掉文件后缀，比如 cat1.jpg → cat1
+        # 再查 labels 获取类别名
+        label = labels[train_file.split('.')[0]]
+        fname = os.path.join(data_dir, 'train', train_file)
+        # 首先把样本复制到一个“汇总文件夹” train_valid/label/ 下
+        copyfile(fname, os.path.join(data_dir, 'train_valid_test',
+                                     'train_valid', label))
+        if label not in label_count or label_count[label] < n_valid_per_label:
+            copyfile(fname, os.path.join(data_dir, 'train_valid_test',
+                                         'valid', label))
+            # 取出键的值，如果没有这个键就是0
+            label_count[label] = label_count.get(label, 0) + 1
+        else:
+            copyfile(fname, os.path.join(data_dir, 'train_valid_test',
+                                         'train', label))
+    return n_valid_per_label
+
+#@save
+def reorg_test(data_dir):
+    """在预测期间整理测试集，以方便读取"""
+    # ********************************************************************************
+    # 执行完函数后，数据集结构变成：
+    # train_valid_test/
+    #     train/
+    #         cat/
+    #         dog/
+    #     valid/
+    #         cat/
+    #         dog/
+    #     test/
+    #         unknown/
+    #             img1.jpg
+    #             img2.jpg
+    #             ...
+    # ********************************************************************************
+    for test_file in os.listdir(os.path.join(data_dir, 'test')):
+        copyfile(os.path.join(data_dir, 'test', test_file),
+                 os.path.join(data_dir, 'train_valid_test', 'test',
+                              'unknown'))
+
+# 整理并读取cifar10数据集
+def reorg_cifar10_data(data_dir, valid_ratio = 0.1):
+    # 读取标签
+    labels = read_csv_labels(os.path.join(data_dir, 'trainLabels.csv'))
+    # 将验证集从原始的训练集中拆分出来
+    reorg_train_valid(data_dir, labels, valid_ratio)
+    # 在预测期间整理测试集，以方便读取
+    reorg_test(data_dir)
 
 # ############################# 10.7 ##########################
 def read_imdb(folder='train', data_root="/S1/CSCL/tangss/Datasets/aclImdb"): 
