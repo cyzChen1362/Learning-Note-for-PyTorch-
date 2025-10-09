@@ -7,19 +7,21 @@
 
 目标：
 - 熟悉 **PyTorch** 框架下的深度学习基础与经典模型实现，通过逐行注释和实验，巩固书中理论与实践
-- 新书Chapter 9，作者好多坑，于是猛猛修代码😒代码修理和调试能力得到极大提升😑
+- 新书 Chapter 9 / 10，作者好多坑，于是猛猛修改😒代码修理和调试能力得到极大提升😑
 - d2lzh_pytorch/utils.py库全部函数已进行**像素级**注释和部分**修改/添加**
 
 ---
 
 ## 🔧 修改
-- **两本书籍**  
-由于ShusenTang新书中9.6后面有缺失，以及没有Transformer这里直接参考原书进行学习  
+- **两本书籍+b站视频**  
+由于ShusenTang新书中9.6后面有缺失，  
+以及两本书 encoder/decoder-seq2seq-attention-transformer 逻辑不顺  
+所以本工程 Chapter 10 对应 **b站 跟李沐学AI【完结】动手学深度学习PyTorch版 61-70**
 
 
 - **两版d2l**   
 同时，两本书的d2l库略有不同，所以这里也对d2l库中进行了修改，  
-包括Chapter 9，以及新增的Chapter 11  
+尤其是 Chapter 9，以及新的 Chapter 10
   
 
 - **本土化改良**  
