@@ -130,30 +130,64 @@ test_iter = torch.utils.data.DataLoader(test_ds, batch_size, shuffle=False,
 # 微调预训练模型
 # ========================
 
+from torchvision import models
+from torch.hub import load_state_dict_from_url
+
 def get_net(device):
     finetune_net = nn.Sequential()
-    finetune_net.features = torchvision.models.resnet34(pretrained=True)
+    # 预模型参数
+    weights = load_state_dict_from_url(
+        'https://download.pytorch.org/models/resnet34-333f7ec4.pth',
+        model_dir=r"..\..\data\pretrainedmodels"
+    )
+    # 完整的 ResNet34（包含原 fc 层，1000输出）
+    finetune_net.features = models.resnet34()
+    finetune_net.features.load_state_dict(weights)
     # 定义一个新的输出网络，共有120个输出类别
+    # 接fc,relu,fc从1000-256-120
     finetune_net.output_new = nn.Sequential(nn.Linear(1000, 256),
                                             nn.ReLU(),
                                             nn.Linear(256, 120))
     # 将模型参数分配给用于计算的CPU或GPU
     finetune_net = finetune_net.to(device)
-    # 冻结参数
+    # 冻结features层参数
     for param in finetune_net.features.parameters():
         param.requires_grad = False
     return finetune_net
 
+# def get_net(device):
+#     finetune_net = nn.Sequential()
+#     # 完整的 ResNet34（包含原 fc 层，1000输出）
+#     finetune_net.features = torchvision.models.resnet34(pretrained=True)
+#     # 定义一个新的输出网络，共有120个输出类别
+#     # 接fc,relu,fc从1000-256-120
+#     finetune_net.output_new = nn.Sequential(nn.Linear(1000, 256),
+#                                             nn.ReLU(),
+#                                             nn.Linear(256, 120))
+#     # 将模型参数分配给用于计算的CPU或GPU
+#     finetune_net = finetune_net.to(device)
+#     # 冻结features层参数
+#     for param in finetune_net.features.parameters():
+#         param.requires_grad = False
+#     return finetune_net
+
 loss = nn.CrossEntropyLoss(reduction='none')
 
+# 验证/评估阶段的损失计算函数
+# 用当前网络计算在验证集或测试集上的平均损失
 def evaluate_loss(data_iter, net, device):
+    was_training = net.training
+    net.eval()                              # 关掉 BN 更新 & Dropout
     l_sum, n = 0.0, 0
-    for features, labels in data_iter:
-        features, labels = features.to(device), labels.to(device)
-        outputs = net(features)
-        l = loss(outputs, labels)
-        l_sum += l.sum()
-        n += labels.numel()
+    with torch.no_grad():                   # 关梯度
+        for X, y in data_iter:
+            X, y = X.to(device), y.to(device)
+            y_hat = net(X)
+            l = loss(y_hat, y)
+            l_sum += l.sum()
+            n += y.numel()
+    if was_training:
+        net.train()                         # 恢复原模式
     return (l_sum / n).to('cpu')
 
 # ========================
@@ -165,8 +199,8 @@ import time
 
 def train(net, train_iter, valid_iter, num_epochs, lr, wd, device, lr_period,
           lr_decay):
-    # 只训练小型自定义输出网络
-    net = nn.DataParallel(net).to(device)
+    # 单GPU
+    net = net.to(device)
     trainer = torch.optim.SGD((param for param in net.parameters()
                                if param.requires_grad), lr=lr,
                               momentum=0.9, weight_decay=wd)
@@ -247,6 +281,7 @@ def train(net, train_iter, valid_iter, num_epochs, lr, wd, device, lr_period,
     if valid_iter is not None:
         tail += f", valid loss {valid_losses[-1]:.4f}"
     print(tail + f'\n{examples_per_sec:.1f} examples/sec on {device}')
+
 # ========================
 # 训练和验证模型
 # ========================
