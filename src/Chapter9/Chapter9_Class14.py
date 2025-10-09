@@ -59,8 +59,11 @@ else:
     data_dir = '../../data/dog-breed-identification'
 
 def reorg_dog_data(data_dir, valid_ratio):
+    # 读取标签
     labels = d2l.read_csv_labels(os.path.join(data_dir, 'labels.csv'))
+    # 将验证集从原始的训练集中拆分出来
     d2l.reorg_train_valid(data_dir, labels, valid_ratio)
+    # 在预测期间整理测试集，以方便读取
     d2l.reorg_test(data_dir)
 
 batch_size = 32 if demo else 128
@@ -71,27 +74,33 @@ reorg_dog_data(data_dir, valid_ratio)
 # 图像增广
 # ========================
 
+# 训练集transform
 transform_train = torchvision.transforms.Compose([
     # 随机裁剪图像，所得图像为原始面积的0.08～1之间，高宽比在3/4和4/3之间。
-    # 然后，缩放图像以创建224x224的新图像
+    # 然后缩放为 224×224
     torchvision.transforms.RandomResizedCrop(224, scale=(0.08, 1.0),
                                              ratio=(3.0/4.0, 4.0/3.0)),
+    # 以 50% 概率水平翻转
     torchvision.transforms.RandomHorizontalFlip(),
-    # 随机更改亮度，对比度和饱和度
+    # 随机调整亮度、对比度、饱和度（每次变化范围 ±40%）
     torchvision.transforms.ColorJitter(brightness=0.4,
                                        contrast=0.4,
                                        saturation=0.4),
-    # 添加随机噪声
+    # 把图片从 PIL / NumPy 转成 PyTorch Tensor，像素值缩放到 [0,1]
     torchvision.transforms.ToTensor(),
-    # 标准化图像的每个通道
+    # 标准化图像的每个通道，使用 ImageNet 统计均值与方差
     torchvision.transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])])
 
+# 测试集transform
 transform_test = torchvision.transforms.Compose([
+    # 将图片最短边缩放到 256 像素，保持比例
     torchvision.transforms.Resize(256),
     # 从图像中心裁切224x224大小的图片
     torchvision.transforms.CenterCrop(224),
+    # 把图片从 PIL / NumPy 转成 PyTorch Tensor，像素值缩放到 [0,1]
     torchvision.transforms.ToTensor(),
+    # 标准化图像的每个通道，使用 ImageNet 统计均值与方差
     torchvision.transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])])
 
