@@ -15,7 +15,7 @@
 ## 🔧 修改
 - **两本书籍+b站视频**  
 由于ShusenTang新书中9.6后面有缺失，  
-以及两本书 encoder/decoder-seq2seq-attention-transformer 逻辑不顺  
+以及两本书 encoder/decoder - seq2seq - attention - transformer 逻辑不顺  
 所以本工程 Chapter 10 对应 **b站 跟李沐学AI【完结】动手学深度学习PyTorch版 61-70**
 
 
