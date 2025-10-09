@@ -165,6 +165,8 @@ class Decoder(nn.Module):
     https://chatgpt.com/s/t_68e79ef1f12c81918178c27a484d1638
     https://chatgpt.com/s/t_68e79f0ca0fc81918d18d830e01c4a74
     https://chatgpt.com/s/t_68e79fcd93288191997bbace23c1c519
+    https://chatgpt.com/s/t_68e7a8e76cdc819191d40f5d99342a8b
+    https://chatgpt.com/s/t_68e7aad11eac81919ab0a09b32a53ae3
 """
 
 # ========================
