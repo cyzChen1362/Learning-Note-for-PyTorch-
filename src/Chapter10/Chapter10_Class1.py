@@ -227,6 +227,7 @@ def load_data_nmt(batch_size, num_steps, num_examples=600):
     tgt_array, tgt_valid_len = build_array_nmt(target, tgt_vocab, num_steps)
 
     # 拼接四个张量
+    # 这里data_arrays[1]和data_arrays[3]就是每一句的有效长度，迭代器也会给出
     data_arrays = (src_array, src_valid_len, tgt_array, tgt_valid_len)
     # 封装成批量数据迭代器
     data_iter = d2l.load_array(data_arrays, batch_size)
