@@ -23,167 +23,160 @@ r"""
 """
 
 """
-    编码器-解码器架构
+    机器翻译与数据集
 """
 
-# ********************************************************************************
-# 原书：https://zh.d2l.ai/chapter_recurrent-modern/encoder-decoder.html
-# b站：https://www.bilibili.com/video/BV1c54y1E7YP?spm_id_from=333.788.videopod.episodes&vd_source=8086d55c4f00a2130d3e31cecb0db076
-# ********************************************************************************
-
-# ========================
-# 编码器
-# ========================
-
+import os
+import shutil
+import collections
+import math
+import torch
 from torch import nn
-
-#@save
-# Encoder 接口类
-# 用途：为所有具体的编码器（RNN 编码器、CNN 编码器、Transformer 编码器等）提供一个统一的结构模板
-class Encoder(nn.Module):
-    """编码器-解码器架构的基本编码器接口"""
-    # 调用父类的构造函数
-    # **kwargs 允许子类传入任意额外参数（例如隐藏层大小、embedding维度、层数等）
-    def __init__(self, **kwargs):
-        super(Encoder, self).__init__(**kwargs)
-    # forward() 是 必须由子类实现的抽象方法，定义了编码器的前向传播过程。
-    # X：输入数据（比如一句话的词向量序列或图像特征）
-    # *args：可选的额外参数（如有效长度mask等）
-    # 返回编码后的结果（例如 RNN 的隐藏状态序列、Transformer 的最后层输出等）
-    # 如果不在子类中实现 forward()，则会报错：
-    def forward(self, X, *args):
-        raise NotImplementedError
-
-"""
-    举例：RNN 编码器的子类实现:
-    
-    class Seq2SeqEncoder(Encoder):
-    def __init__(self, vocab_size, embed_size, num_hiddens, num_layers, dropout=0):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.rnn = nn.GRU(embed_size, num_hiddens, num_layers,
-                          dropout=dropout)
-
-    def forward(self, X, *args):
-        # X的形状：[batch_size, seq_len]
-        X = self.embedding(X)               # -> [batch_size, seq_len, embed_size]
-        X = X.permute(1, 0, 2)              # RNN输入要求(seq_len, batch_size, embed_size)
-        output, state = self.rnn(X)
-        # output [seq_len, batch, hidden_size]
-        # state [num_layers, batch, hidden_size]
-        return output, state
-        
-    # embedding = nn.Embedding(vocab_size=10000, embed_size=300)表示：
-    # 词表大小（vocab_size）= 10000
-    # → 一共 10000 个不同的词（每个词有一个唯一的整数 ID：0~9999）
-    # 嵌入维度（embed_size）= 300
-    # → 每个词被表示成一个 300 维的向量。
-    
-    # self.rnn = nn.GRU(embed_size, num_hiddens, num_layers, dropout=dropout)：
-    # https://chatgpt.com/s/t_68e78f0243208191ba876fe076e1a389
-    # https://chatgpt.com/s/t_68e78f22170c8191a50cee7feb990269
-    # https://chatgpt.com/s/t_68e78f36e83c819193a7be2bb4d9bd82
-    # https://chatgpt.com/s/t_68e78f46775c81918b542909c7359e1e
-
-"""
+import d2lzh_pytorch as d2l
 
 # ========================
-# 解码器
+# 下载和预处理数据集
 # ========================
 
 #@save
-# Decoder 接口类
-# 用途：为后续各种具体解码器（如RNN解码器、Transformer解码器）提供模板
-class Decoder(nn.Module):
-    """编码器-解码器架构的基本解码器接口"""
-    # 调用父类的构造函数
-    # **kwargs 允许子类传入任意关键字参数（如隐藏层维度、dropout等）
-    def __init__(self, **kwargs):
-        super(Decoder, self).__init__(**kwargs)
-    # 定义了解码器在开始工作前如何初始化内部状态（state）
-    # 输入通常是来自编码器的输出 enc_outputs（例如RNN的隐藏状态、Transformer的memory等）。
-    # 子类必须重写这个函数，否则会抛出 NotImplementedError。
-    def init_state(self, enc_outputs, *args):
-        raise NotImplementedError
+d2l.DATA_HUB['fra-eng'] = (d2l.DATA_URL + 'fra-eng.zip',
+                           '94646ad1522d915e7b0f9296181140edcf86a4f5')
 
-    def forward(self, X, state):
-        raise NotImplementedError
+#@save
+def read_data_nmt():
+    """载入“英语－法语”数据集"""
+    tmp_dir = d2l.download_extract('fra-eng')
 
+    # 希望的最终路径，在这个路径下创建文件夹
+    target_dir = r"D:\LearningDeepLearning\LearningNote_Dive-into-DL-PyTorch\data\fra-eng"
+    os.makedirs(target_dir, exist_ok=True)
 
-"""
-    举例：RNN 解码器子类实现:
+    # 如果目标目录为空，则移动一次即可
+    # 将文件从默认规则下载的位置移动到目标路径
+    if not os.listdir(target_dir):
+        for item in os.listdir(tmp_dir):
+            s = os.path.join(tmp_dir, item)
+            d = os.path.join(target_dir, item)
+            if os.path.isdir(s):
+                shutil.copytree(s, d, dirs_exist_ok=True)
+            else:
+                shutil.copy2(s, d)
 
-    class Seq2SeqDecoder(Decoder):
-    def __init__(self, vocab_size, embed_size, num_hiddens, num_layers, dropout=0):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.rnn = nn.GRU(embed_size + num_hiddens, num_hiddens, num_layers,
-                          dropout=dropout)
-        self.dense = nn.Linear(num_hiddens, vocab_size)
+    with open(os.path.join(target_dir, 'fra.txt'), 'r',
+             encoding='utf-8') as f:
+        return f.read()
 
-    # init_state() 的参数 enc_outputs 是由 编码器的 forward() 输出 传进来的，手动显式写出
-    # enc_outputs = encoder(X_src)
-    # dec_state = decoder.init_state(enc_outputs)
+raw_text = read_data_nmt()
+print(raw_text[:75])
 
-    def init_state(self, enc_outputs, *args):
-    
-        # 根据编码器输出初始化解码器状态
-        # enc_outputs: (enc_outputs, enc_state)
-        # 这里只使用编码器的最终隐藏状态 enc_state
-        
-        return enc_outputs[1]
+#@save
+def preprocess_nmt(text):
+    """预处理“英语－法语”数据集"""
+    def no_space(char, prev_char):
+        return char in set(',.!?') and prev_char != ' '
 
-    # forward(self, X, state)的state参数以init_state的输出传入
+    # 使用空格替换不间断空格
+    # 使用小写字母替换大写字母
+    text = text.replace('\u202f', ' ').replace('\xa0', ' ').lower()
+    # 在单词和标点符号之间插入空格
+    out = [' ' + char if i > 0 and no_space(char, text[i - 1]) else char
+           for i, char in enumerate(text)]
+    return ''.join(out)
 
-    def forward(self, X, state):
-    
-        # X: [batch_size, num_steps] —— 解码器输入（训练时通常为上一个真实 token）
-        # state: [num_layers, batch_size, num_hiddens] —— 上一个时刻的隐藏状态
-        # 返回:
-        #     output: [batch_size, num_steps, vocab_size]
-        #     state:  [num_layers, batch_size, num_hiddens]
-        
-        # 1️⃣ 嵌入层：将词索引转换为embedding向量
-        X = self.embedding(X).permute(1, 0, 2)  # [num_steps, batch, embed_size]
-
-        # 2️⃣ 为每个时间步扩展编码器最终状态（上下文）
-        # state[-1] 是最后一层隐藏状态，用于作为上下文拼接
-        context = state[-1].repeat(X.shape[0], 1, 1)  # [num_steps, batch, num_hiddens]
-        X_and_context = torch.cat((X, context), 2)     # 拼接到输入： [num_steps, batch, embed+hidden]
-
-        # 3️⃣ GRU 前向传播
-        output, state = self.rnn(X_and_context, state)
-
-        # 4️⃣ 输出层，将隐藏状态映射到词表维度
-        output = self.dense(output).permute(1, 0, 2)  # [batch, num_steps, vocab_size]
-        return output, state
-
-"""
-
-"""
-    顺便把seq2seq说清楚：
-    https://chatgpt.com/s/t_68e79ef1f12c81918178c27a484d1638
-    https://chatgpt.com/s/t_68e79f0ca0fc81918d18d830e01c4a74
-    https://chatgpt.com/s/t_68e79fcd93288191997bbace23c1c519
-    https://chatgpt.com/s/t_68e7a8e76cdc819191d40f5d99342a8b
-    https://chatgpt.com/s/t_68e7aad11eac81919ab0a09b32a53ae3
-"""
+text = preprocess_nmt(raw_text)
+print(text[:80])
 
 # ========================
-# 合并编码器和解码器
+# 词元化
 # ========================
 
 #@save
-# 合并编码器和解码器
-# 对着上面encoder和decoder就能看个八九不离十了
-class EncoderDecoder(nn.Module):
-    """编码器-解码器架构的基类"""
-    def __init__(self, encoder, decoder, **kwargs):
-        super(EncoderDecoder, self).__init__(**kwargs)
-        self.encoder = encoder
-        self.decoder = decoder
+def tokenize_nmt(text, num_examples=None):
+    """词元化“英语－法语”数据数据集"""
+    source, target = [], []
+    for i, line in enumerate(text.split('\n')):
+        if num_examples and i > num_examples:
+            break
+        parts = line.split('\t')
+        if len(parts) == 2:
+            source.append(parts[0].split(' '))
+            target.append(parts[1].split(' '))
+    return source, target
 
-    def forward(self, enc_X, dec_X, *args):
-        enc_outputs = self.encoder(enc_X, *args)
-        dec_state = self.decoder.init_state(enc_outputs, *args)
-        return self.decoder(dec_X, dec_state)
+source, target = tokenize_nmt(text)
+print(source[:6])
+print(target[:6])
+
+#@save
+def show_list_len_pair_hist(legend, xlabel, ylabel, xlist, ylist):
+    """绘制列表长度对的直方图"""
+    d2l.set_figsize(figsize=(8, 6))
+    _, _, patches = d2l.plt.hist(
+        [[len(l) for l in xlist], [len(l) for l in ylist]])
+    d2l.plt.xlabel(xlabel)
+    d2l.plt.ylabel(ylabel)
+    for patch in patches[1].patches:
+        patch.set_hatch('/')
+    d2l.plt.legend(legend)
+    d2l.plt.show()
+
+show_list_len_pair_hist(['source', 'target'], '# tokens per sequence',
+                        'count', source, target);
+
+# ========================
+# 词表
+# ========================
+
+src_vocab = d2l.Vocab(source, min_freq=2,
+                      reserved_tokens=['<pad>', '<bos>', '<eos>'])
+len(src_vocab)
+
+# ========================
+# 加载数据集
+# ========================
+
+#@save
+def truncate_pad(line, num_steps, padding_token):
+    """截断或填充文本序列"""
+    if len(line) > num_steps:
+        return line[:num_steps]  # 截断
+    return line + [padding_token] * (num_steps - len(line))  # 填充
+
+print(truncate_pad(src_vocab[source[0]], 10, src_vocab['<pad>']))
+
+#@save
+def build_array_nmt(lines, vocab, num_steps):
+    """将机器翻译的文本序列转换成小批量"""
+    lines = [vocab[l] for l in lines]
+    lines = [l + [vocab['<eos>']] for l in lines]
+    array = torch.tensor([truncate_pad(
+        l, num_steps, vocab['<pad>']) for l in lines])
+    valid_len = (array != vocab['<pad>']).type(torch.int32).sum(1)
+    return array, valid_len
+
+# ========================
+# 训练模型
+# ========================
+
+#@save
+def load_data_nmt(batch_size, num_steps, num_examples=600):
+    """返回翻译数据集的迭代器和词表"""
+    text = preprocess_nmt(read_data_nmt())
+    source, target = tokenize_nmt(text, num_examples)
+    src_vocab = d2l.Vocab(source, min_freq=2,
+                          reserved_tokens=['<pad>', '<bos>', '<eos>'])
+    tgt_vocab = d2l.Vocab(target, min_freq=2,
+                          reserved_tokens=['<pad>', '<bos>', '<eos>'])
+    src_array, src_valid_len = build_array_nmt(source, src_vocab, num_steps)
+    tgt_array, tgt_valid_len = build_array_nmt(target, tgt_vocab, num_steps)
+    data_arrays = (src_array, src_valid_len, tgt_array, tgt_valid_len)
+    data_iter = d2l.load_array(data_arrays, batch_size)
+    return data_iter, src_vocab, tgt_vocab
+
+train_iter, src_vocab, tgt_vocab = load_data_nmt(batch_size=2, num_steps=8)
+for X, X_valid_len, Y, Y_valid_len in train_iter:
+    print('X:', X.type(torch.int32))
+    print('X的有效长度:', X_valid_len)
+    print('Y:', Y.type(torch.int32))
+    print('Y的有效长度:', Y_valid_len)
+    break
