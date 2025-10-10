@@ -2183,14 +2183,31 @@ class Vocab:
             tokens = []
         if reserved_tokens is None:
             reserved_tokens = []
+
+        # 词频统计
         # 按出现频率排序
+        # 调用 count_corpus() 统计每个词出现的次数；
+        # 然后按出现频率降序排列，得到形如：[('you', 2), ('love', 2), ('i', 1), ('me', 1)]
         counter = count_corpus(tokens)
         self._token_freqs = sorted(counter.items(), key=lambda x: x[1],
                                    reverse=True)
+
+        # 建立索引→词的列表idx_to_token 和 词→索引的字典token_to_idx
+
+        # 首先初始化特殊词元
         # 未知词元的索引为0
+        # 示例：
+        # reserved_tokens = ['<pad>', '<bos>', '<eos>']
+        # idx_to_token = ['<unk>', '<pad>', '<bos>', '<eos>']
+        # token_to_idx = {'<unk>': 0, '<pad>': 1, '<bos>': 2, '<eos>': 3}
         self.idx_to_token = ['<unk>'] + reserved_tokens
         self.token_to_idx = {token: idx
                              for idx, token in enumerate(self.idx_to_token)}
+
+        # 其次添加普通词元
+        # 逐个扫描词频表；
+        # 只保留出现次数 ≥ min_freq 的词；
+        # 避免重复（已存在的词不再添加）
         for token, freq in self._token_freqs:
             if freq < min_freq:
                 break
@@ -2198,23 +2215,36 @@ class Vocab:
                 self.idx_to_token.append(token)
                 self.token_to_idx[token] = len(self.idx_to_token) - 1
 
+    # 词表的总大小
     def __len__(self):
         return len(self.idx_to_token)
 
+    # 输入可以是单个 token 或 token 列表；
+    # 查不到的词返回 <unk> 的索引（即 0）；
+    # 例如：
+    # vocab['love'] → 5
+    # vocab[['i', 'love', 'you']] → [3, 5, 4]
     def __getitem__(self, tokens):
         if not isinstance(tokens, (list, tuple)):
             return self.token_to_idx.get(tokens, self.unk)
         return [self.__getitem__(token) for token in tokens]
 
+    # 反向映射：索引 → 词
+    # 例如：
+    # vocab.to_tokens([3, 5, 4]) → ['i', 'love', 'you']
     def to_tokens(self, indices):
         if not isinstance(indices, (list, tuple)):
             return self.idx_to_token[indices]
         return [self.idx_to_token[index] for index in indices]
 
+    # unk 属性
+    # 指定 <unk> 的索引永远是 0
     @property
     def unk(self):  # 未知词元的索引为0
         return 0
 
+    # token_freqs 属性
+    # 可查看词频统计表，用于分析词分布或画 Zipf 定律图
     @property
     def token_freqs(self):
         return self._token_freqs
