@@ -2249,6 +2249,159 @@ class Vocab:
     def token_freqs(self):
         return self._token_freqs
 
+DATA_HUB['fra-eng'] = (DATA_URL + 'fra-eng.zip',
+                           '94646ad1522d915e7b0f9296181140edcf86a4f5')
+
+# 下载数据集
+def read_data_nmt():
+    """载入“英语－法语”数据集"""
+    tmp_dir = download_extract('fra-eng')
+
+    # 希望的最终路径，在这个路径下创建文件夹
+    target_dir = r"D:\LearningDeepLearning\LearningNote_Dive-into-DL-PyTorch\data\fra-eng"
+    os.makedirs(target_dir, exist_ok=True)
+
+    # 如果目标目录为空，则移动一次即可
+    # 将文件从默认规则下载的位置移动到目标路径
+    if not os.listdir(target_dir):
+        for item in os.listdir(tmp_dir):
+            s = os.path.join(tmp_dir, item)
+            d = os.path.join(target_dir, item)
+            if os.path.isdir(s):
+                shutil.copytree(s, d, dirs_exist_ok=True)
+            else:
+                shutil.copy2(s, d)
+
+    with open(os.path.join(target_dir, 'fra.txt'), 'r',
+             encoding='utf-8') as f:
+        return f.read()
+
+# 预处理“英语－法语”数据集
+def preprocess_nmt(text):
+    """预处理“英语－法语”数据集"""
+
+    def no_space(char, prev_char):
+        # 如果当前字符 char 是标点符号之一（,、.、!、?），且前一个字符不是空格，则返回 True。
+        # 用来判断是否需要在标点前插入一个空格
+        return char in set(',.!?') and prev_char != ' '
+
+    # 使用空格替换不间断空格，并使用小写字母替换大写字母
+    text = text.replace('\u202f', ' ').replace('\xa0', ' ').lower()
+
+    # 在单词和标点符号之间插入空格
+    # 如果当前字符是标点且前面没有空格 → 在标点前加一个空格；
+    # 否则保持原样；
+    # 最后把字符列表重新拼成字符串
+    out = [' ' + char if i > 0 and no_space(char, text[i - 1]) else char
+           for i, char in enumerate(text)]
+    return ''.join(out)
+
+# 把整段英法平行文本分割成 “词元（token）序列列表”
+def tokenize_nmt(text, num_examples=None):
+    """词元化“英语－法语”数据数据集"""
+    # source：英语句子词元化结果
+    # target：法语句子词元化结果
+    source, target = [], []
+    for i, line in enumerate(text.split('\n')):
+        # 用来限制只读取前 N 行，方便调试或快速预览
+        if num_examples and i > num_examples:
+            break
+        parts = line.split('\t')
+        if len(parts) == 2:
+            # 这里的split(' ')把句子词元化
+            source.append(parts[0].split(' '))
+            target.append(parts[1].split(' '))
+    return source, target
+
+# 绘制列表长度对的直方图
+def show_list_len_pair_hist(legend, xlabel, ylabel, xlist, ylist):
+    """绘制列表长度对的直方图"""
+    set_figsize(figsize=(8, 6))
+    _, _, patches = plt.hist(
+        [[len(l) for l in xlist], [len(l) for l in ylist]])
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    for patch in patches[1].patches:
+        patch.set_hatch('/')
+    plt.legend(legend)
+    plt.show()
+
+# 截断或填充文本序列
+def truncate_pad(line, num_steps, padding_token):
+    """截断或填充文本序列"""
+    # 把输入的 token 序列 line 处理成固定长度 num_steps；
+    # 太长就截断；
+    # 太短就用 padding_token 填充。
+    if len(line) > num_steps:
+        return line[:num_steps]  # 截断
+    return line + [padding_token] * (num_steps - len(line))  # 填充
+
+# 句子 —— “张量 + 有效长度”
+def build_array_nmt(lines, vocab, num_steps):
+    """将机器翻译的文本序列转换成小批量"""
+    # 输入：
+    # 若干句子（词序列）
+    # 输出：
+    # array：形状一致的 Tensor（张量）
+    # valid_len：每个句子实际的有效长度（不包括 <pad>）
+
+    # 利用 Vocab.__getitem__()，将每个句子的 token 列表转成整数索引；
+    # [["i","love","you"],["you","love","me"]]
+    # → [[3,5,4],[4,5,6]]
+    lines = [vocab[l] for l in lines]
+
+    # 给每个句子加上结束符 <eos>
+    # [3,5,4] → [3,5,4,7]  # 若 <eos> 的索引为7
+    lines = [l + [vocab['<eos>']] for l in lines]
+
+    # 截断或填充
+    # 使用 truncate_pad() 让所有句子等长；
+    # 不足的部分用 <pad> 补齐；
+    # 最后转为 PyTorch 张量。
+    array = torch.tensor([truncate_pad(
+        l, num_steps, vocab['<pad>']) for l in lines])
+
+    # 计算每个句子的有效长度
+    # (array != vocab['<pad>']) 生成布尔矩阵，True 表示非填充位置；
+    # .sum(1) 沿着句子维度求和；
+    # 结果是每个句子的实际词元数
+    valid_len = (array != vocab['<pad>']).type(torch.int32).sum(1)
+
+    return array, valid_len
+
+# 返回翻译数据集的迭代器和词表
+def load_data_nmt(batch_size, num_steps, num_examples=600):
+    """返回翻译数据集的迭代器和词表"""
+    # batch_size	每次迭代的样本数量
+    # num_steps	    每个句子的固定长度（截断或填充）
+    # num_examples	只使用前多少个样本（加快调试；默认 600）
+
+    # 读取并预处理原始数据
+    # 调用 read_data_nmt() 载入 “英-法” 原始文本，然后用 preprocess_nmt() 清洗
+    text = preprocess_nmt(read_data_nmt())
+
+    # 使用制表符 \t 拆分出英文 (source) 和法文 (target)，再按空格分词
+    source, target = tokenize_nmt(text, num_examples)
+
+    # 得到源语料的词表
+    src_vocab = Vocab(source, min_freq=2,
+                          reserved_tokens=['<pad>', '<bos>', '<eos>'])
+    # 得到目标语料的词表
+    tgt_vocab = Vocab(target, min_freq=2,
+                          reserved_tokens=['<pad>', '<bos>', '<eos>'])
+
+    # 将源语料的每个句子转成有效长度的张量，以及每句的有效长度
+    src_array, src_valid_len = build_array_nmt(source, src_vocab, num_steps)
+    # 将目标语料的每个句子转成有效长度的张量，以及每句的有效长度
+    tgt_array, tgt_valid_len = build_array_nmt(target, tgt_vocab, num_steps)
+
+    # 拼接四个张量
+    data_arrays = (src_array, src_valid_len, tgt_array, tgt_valid_len)
+    # 封装成批量数据迭代器
+    data_iter = load_array(data_arrays, batch_size)
+    return data_iter, src_vocab, tgt_vocab
+
+
 # ############################# 10.2 ##########################
 
 # Encoder 接口类
@@ -2395,59 +2548,61 @@ class EncoderDecoder(nn.Module):
         dec_state = self.decoder.init_state(enc_outputs, *args)
         return self.decoder(dec_X, dec_state)
 
-# ############################# 10.7 ##########################
-def read_imdb(folder='train', data_root="/S1/CSCL/tangss/Datasets/aclImdb"): 
-    data = []
-    for label in ['pos', 'neg']:
-        folder_name = os.path.join(data_root, folder, label)
-        for file in tqdm(os.listdir(folder_name)):
-            with open(os.path.join(folder_name, file), 'rb') as f:
-                review = f.read().decode('utf-8').replace('\n', '').lower()
-                data.append([review, 1 if label == 'pos' else 0])
-    random.shuffle(data)
-    return data
+# ############################# 10.7(old) ##########################
+# def read_imdb(folder='train', data_root="/S1/CSCL/tangss/Datasets/aclImdb"):
+#     data = []
+#     for label in ['pos', 'neg']:
+#         folder_name = os.path.join(data_root, folder, label)
+#         for file in tqdm(os.listdir(folder_name)):
+#             with open(os.path.join(folder_name, file), 'rb') as f:
+#                 review = f.read().decode('utf-8').replace('\n', '').lower()
+#                 data.append([review, 1 if label == 'pos' else 0])
+#     random.shuffle(data)
+#     return data
+#
+# def get_tokenized_imdb(data):
+#     """
+#     data: list of [string, label]
+#     """
+#     def tokenizer(text):
+#         return [tok.lower() for tok in text.split(' ')]
+#     return [tokenizer(review) for review, _ in data]
+#
+# def get_vocab_imdb(data):
+#     tokenized_data = get_tokenized_imdb(data)
+#     counter = collections.Counter([tk for st in tokenized_data for tk in st])
+#     return torchtext.vocab.Vocab(counter, min_freq=5)
+#
+# def preprocess_imdb(data, vocab):
+#     max_l = 500  # 将每条评论通过截断或者补0，使得长度变成500
+#
+#     def pad(x):
+#         return x[:max_l] if len(x) > max_l else x + [0] * (max_l - len(x))
+#
+#     tokenized_data = get_tokenized_imdb(data)
+#     features = torch.tensor([pad([vocab.stoi[word] for word in words]) for words in tokenized_data])
+#     labels = torch.tensor([score for _, score in data])
+#     return features, labels
+#
+# def load_pretrained_embedding(words, pretrained_vocab):
+#     """从预训练好的vocab中提取出words对应的词向量"""
+#     embed = torch.zeros(len(words), pretrained_vocab.vectors[0].shape[0]) # 初始化为0
+#     oov_count = 0 # out of vocabulary
+#     for i, word in enumerate(words):
+#         try:
+#             idx = pretrained_vocab.stoi[word]
+#             embed[i, :] = pretrained_vocab.vectors[idx]
+#         except KeyError:
+#             oov_count += 1
+#     if oov_count > 0:
+#         print("There are %d oov words." % oov_count)
+#     return embed
+#
+# def predict_sentiment(net, vocab, sentence):
+#     """sentence是词语的列表"""
+#     device = list(net.parameters())[0].device
+#     sentence = torch.tensor([vocab.stoi[word] for word in sentence], device=device)
+#     label = torch.argmax(net(sentence.view((1, -1))), dim=1)
+#     return 'positive' if label.item() == 1 else 'negative'
 
-def get_tokenized_imdb(data):
-    """
-    data: list of [string, label]
-    """
-    def tokenizer(text):
-        return [tok.lower() for tok in text.split(' ')]
-    return [tokenizer(review) for review, _ in data]
 
-def get_vocab_imdb(data):
-    tokenized_data = get_tokenized_imdb(data)
-    counter = collections.Counter([tk for st in tokenized_data for tk in st])
-    return torchtext.vocab.Vocab(counter, min_freq=5)
-
-def preprocess_imdb(data, vocab):
-    max_l = 500  # 将每条评论通过截断或者补0，使得长度变成500
-
-    def pad(x):
-        return x[:max_l] if len(x) > max_l else x + [0] * (max_l - len(x))
-
-    tokenized_data = get_tokenized_imdb(data)
-    features = torch.tensor([pad([vocab.stoi[word] for word in words]) for words in tokenized_data])
-    labels = torch.tensor([score for _, score in data])
-    return features, labels
-
-def load_pretrained_embedding(words, pretrained_vocab):
-    """从预训练好的vocab中提取出words对应的词向量"""
-    embed = torch.zeros(len(words), pretrained_vocab.vectors[0].shape[0]) # 初始化为0
-    oov_count = 0 # out of vocabulary
-    for i, word in enumerate(words):
-        try:
-            idx = pretrained_vocab.stoi[word]
-            embed[i, :] = pretrained_vocab.vectors[idx]
-        except KeyError:
-            oov_count += 1
-    if oov_count > 0:
-        print("There are %d oov words." % oov_count)
-    return embed
-
-def predict_sentiment(net, vocab, sentence):
-    """sentence是词语的列表"""
-    device = list(net.parameters())[0].device
-    sentence = torch.tensor([vocab.stoi[word] for word in sentence], device=device)
-    label = torch.argmax(net(sentence.view((1, -1))), dim=1)
-    return 'positive' if label.item() == 1 else 'negative'
