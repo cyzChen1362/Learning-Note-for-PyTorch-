@@ -7,6 +7,7 @@
 
 目标：
 - 熟悉 **PyTorch** 框架下的深度学习基础与经典模型实现，通过逐行注释和实验，巩固书中理论与实践
+- 入门 Linear Regression · MLP · CNN & R-CNN · RNN & NLP · Attention & Transformer · Optimization
 - 新书 Chapter 9 / 10，作者好多坑，于是猛猛修改😒代码修理和调试能力得到极大提升😑
 - d2lzh_pytorch/utils.py库全部函数已进行**像素级**注释和部分**修改/添加**
 

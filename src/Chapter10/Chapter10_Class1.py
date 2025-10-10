@@ -66,23 +66,31 @@ def read_data_nmt():
              encoding='utf-8') as f:
         return f.read()
 
+# 测试
 raw_text = read_data_nmt()
 print(raw_text[:75])
 
 #@save
 def preprocess_nmt(text):
     """预处理“英语－法语”数据集"""
+
     def no_space(char, prev_char):
+        # 如果当前字符 char 是标点符号之一（,、.、!、?），且前一个字符不是空格，则返回 True。
+        # 用来判断是否需要在标点前插入一个空格
         return char in set(',.!?') and prev_char != ' '
 
-    # 使用空格替换不间断空格
-    # 使用小写字母替换大写字母
+    # 使用空格替换不间断空格，并使用小写字母替换大写字母
     text = text.replace('\u202f', ' ').replace('\xa0', ' ').lower()
+
     # 在单词和标点符号之间插入空格
+    # 如果当前字符是标点且前面没有空格 → 在标点前加一个空格；
+    # 否则保持原样；
+    # 最后把字符列表重新拼成字符串
     out = [' ' + char if i > 0 and no_space(char, text[i - 1]) else char
            for i, char in enumerate(text)]
     return ''.join(out)
 
+# 测试
 text = preprocess_nmt(raw_text)
 print(text[:80])
 
@@ -91,10 +99,14 @@ print(text[:80])
 # ========================
 
 #@save
+# 把整段英法平行文本分割成 “词元（token）序列列表”
 def tokenize_nmt(text, num_examples=None):
     """词元化“英语－法语”数据数据集"""
+    # source：英语句子词元化结果
+    # target：法语句子词元化结果
     source, target = [], []
     for i, line in enumerate(text.split('\n')):
+        # 用来限制只读取前 N 行，方便调试或快速预览
         if num_examples and i > num_examples:
             break
         parts = line.split('\t')
@@ -103,6 +115,7 @@ def tokenize_nmt(text, num_examples=None):
             target.append(parts[1].split(' '))
     return source, target
 
+# 测试
 source, target = tokenize_nmt(text)
 print(source[:6])
 print(target[:6])
@@ -129,7 +142,7 @@ show_list_len_pair_hist(['source', 'target'], '# tokens per sequence',
 
 src_vocab = d2l.Vocab(source, min_freq=2,
                       reserved_tokens=['<pad>', '<bos>', '<eos>'])
-len(src_vocab)
+print(len(src_vocab))
 
 # ========================
 # 加载数据集
