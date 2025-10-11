@@ -2817,6 +2817,68 @@ def bleu(pred_seq, label_seq, k):  #@save
         score *= math.pow(num_matches / (len_pred - n + 1), math.pow(0.5, n))
     return score
 
+# ############################# 10.4 ##########################
+
+# 注意力权重热力图可视化
+def show_heatmaps(matrices, xlabel, ylabel, titles=None, figsize=(6, 5),
+                  cmap='Reds'):
+    """显示矩阵热图"""
+    # 输入matrices的形状是 （要显示的行数，要显示的列数，查询的数目，键的数目）
+    # 具体每个参数的解析如下：
+    # 可以先参考Chapter10_Class6第三部分的注释，理解Q K V先
+    # https://chatgpt.com/s/t_68ea1d737348819181ad6c85e39397bd
+    # https://chatgpt.com/s/t_68ea1d818bdc8191863ad1dd622353dd
+    # https://chatgpt.com/s/t_68ea1d90daf4819181a2c74f794e1336
+    use_svg_display()
+    num_rows, num_cols = matrices.shape[0], matrices.shape[1]
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=figsize,
+                                 sharex=True, sharey=True, squeeze=False)
+    for i, (row_axes, row_matrices) in enumerate(zip(axes, matrices)):
+        for j, (ax, matrix) in enumerate(zip(row_axes, row_matrices)):
+            pcm = ax.imshow(matrix.detach().numpy(), cmap=cmap)
+            if i == num_rows - 1:
+                ax.set_xlabel(xlabel)
+            if j == 0:
+                ax.set_ylabel(ylabel)
+            if titles:
+                ax.set_title(titles[j])
+    fig.colorbar(pcm, ax=axes, shrink=0.6);
+    plt.show()
+
+# ############################# 10.5 ##########################
+
+def plot(X, Y=None, xlabel=None, ylabel=None, legend=None, xlim=None,
+         ylim=None, xscale='linear', yscale='linear',
+         fmts=('-', 'm--', 'g-.', 'r:'), figsize=(6, 4), axes=None):
+    """绘制数据点
+
+    Defined in :numref:`sec_calculus`"""
+    if legend is None:
+        legend = []
+
+    set_figsize(figsize)
+    axes = axes if axes else plt.gca()
+
+    # 如果X有一个轴，输出True
+    def has_one_axis(X):
+        return (hasattr(X, "ndim") and X.ndim == 1 or isinstance(X, list)
+                and not hasattr(X[0], "__len__"))
+
+    if has_one_axis(X):
+        X = [X]
+    if Y is None:
+        X, Y = [[]] * len(X), X
+    elif has_one_axis(Y):
+        Y = [Y]
+    if len(X) != len(Y):
+        X = X * len(Y)
+    axes.cla()
+    for x, y, fmt in zip(X, Y, fmts):
+        if len(x):
+            axes.plot(x, y, fmt)
+        else:
+            axes.plot(y, fmt)
+    set_axes(axes, xlabel, ylabel, xlim, ylim, xscale, yscale, legend)
 
 # ############################# 10.7(old) ##########################
 # def read_imdb(folder='train', data_root="/S1/CSCL/tangss/Datasets/aclImdb"):
