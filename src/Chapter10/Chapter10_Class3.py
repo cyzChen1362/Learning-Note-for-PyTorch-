@@ -202,6 +202,7 @@ import time
 import matplotlib.pyplot as plt
 
 #@save
+# Seq2Seq训练
 def train_seq2seq(net, data_iter, lr, num_epochs, tgt_vocab, device):
     """训练序列到序列模型"""
     # 对模型中的 nn.Linear 和 nn.GRU 层的 weight 参数使用 Xavier 均匀初始化
