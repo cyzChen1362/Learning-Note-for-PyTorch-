@@ -204,6 +204,7 @@ import matplotlib.pyplot as plt
 #@save
 def train_seq2seq(net, data_iter, lr, num_epochs, tgt_vocab, device):
     """训练序列到序列模型"""
+    # 对模型中的 nn.Linear 和 nn.GRU 层的 weight 参数使用 Xavier 均匀初始化
     def xavier_init_weights(m):
         if type(m) == nn.Linear:
             nn.init.xavier_uniform_(m.weight)
@@ -212,7 +213,10 @@ def train_seq2seq(net, data_iter, lr, num_epochs, tgt_vocab, device):
                 if "weight" in param:
                     nn.init.xavier_uniform_(m._parameters[param])
 
+    # 权重初始化
     net.apply(xavier_init_weights)
+
+    # device，优化，损失，开启训练
     net.to(device)
     optimizer = torch.optim.Adam(net.parameters(), lr=lr)
     loss = MaskedSoftmaxCELoss()
@@ -227,14 +231,38 @@ def train_seq2seq(net, data_iter, lr, num_epochs, tgt_vocab, device):
 
         for batch in data_iter:
             optimizer.zero_grad()
+            # 见 10.1 load_data_nmt
+            # X, Y: (batch_size, num_steps)
+            # X_valid_len, Y_valid_len: (batch_size,)
             X, X_valid_len, Y, Y_valid_len = [x.to(device) for x in batch]
+            # 对每个样本加上句首符号 <bos>
             bos = torch.tensor([tgt_vocab['<bos>']] * Y.shape[0],
                           device=device).reshape(-1, 1)
+            # 并去掉原句的最后一个词
             dec_input = torch.cat([bos, Y[:, :-1]], 1)  # 强制教学
+            # 这里dec_input是传给net的第二个参数
+            # 也就是EncoderDecoder的forward的dec_X参数
+            # 也就是Seq2SeqDecoder的forward的X参数
+            # 也就是强制教学
+            # ********************************************************************************
+            # 这里一个很细的问题是：self.rnn会不会遇到不同的num_step的x输入的情况？
+            # 以及如果是不同num_step的x，是自适应停下吗？
+            # 实质上并不会，因为num_step用了truncate_pad方法强制对齐等长
+            # rnn对于所有等长的输入x都是机械地走完num_step而已
+            # 同时MaskedSoftmaxCELoss遮蔽机制忽略了计算损失时填充的部分
+            # 同时，也不需要显式告诉self.rnn的num_step有多大
+            # X = self.embedding(X)
+            # X = X.permute(1, 0, 2)
+            # output, state = self.rnn(X)
+            # 这里rnn会按输入张量的第一维的长度展开时间步
+            # ********************************************************************************
             Y_hat, _ = net(X, dec_input, X_valid_len)
+            # 损失函数、反向传播
             l = loss(Y_hat, Y, Y_valid_len)
-            l.sum().backward()      # 损失函数的标量进行“反向传播”
+            l.sum().backward()
+            # 裁剪梯度，防止梯度爆炸
             d2l.grad_clipping(net.parameters(), 1, device)
+            # 当前 batch 的有效词元总数为 num_tokens
             num_tokens = Y_valid_len.sum()
             optimizer.step()
             with torch.no_grad():
@@ -265,6 +293,7 @@ batch_size, num_steps = 64, 10
 lr, num_epochs = 0.005, 300
 
 train_iter, src_vocab, tgt_vocab = d2l.load_data_nmt(batch_size, num_steps)
+# len(src_vocab)即vocab_size
 encoder = Seq2SeqEncoder(len(src_vocab), embed_size, num_hiddens, num_layers,
                         dropout)
 decoder = Seq2SeqDecoder(len(tgt_vocab), embed_size, num_hiddens, num_layers,
@@ -282,22 +311,28 @@ def predict_seq2seq(net, src_sentence, src_vocab, tgt_vocab, num_steps,
     """序列到序列模型的预测"""
     # 在预测时将net设置为评估模式
     net.eval()
+    # src_sentence是源句子，将源句子变成小写并分词，然后src_vocab是源句子的词表
+    # 也就是源句子分割为词并转为索引形式
     src_tokens = src_vocab[src_sentence.lower().split(' ')] + [
         src_vocab['<eos>']]
+    # 源vocab_size
     enc_valid_len = torch.tensor([len(src_tokens)], device=device)
+    # 填充或截断为num_step
     src_tokens = d2l.truncate_pad(src_tokens, num_steps, src_vocab['<pad>'])
-    # 添加批量轴
+    # 添加批量轴batch_size
     enc_X = torch.unsqueeze(
         torch.tensor(src_tokens, dtype=torch.long, device=device), dim=0)
+    # encoder
     enc_outputs = net.encoder(enc_X, enc_valid_len)
     # 这句将encoder的output,state传入了decoder的init_state中
     # net.decoder.init_state返回元组(enc_outputs[1],enc_outputs[1][-1])
     dec_state = net.decoder.init_state(enc_outputs, enc_valid_len)
-    # 添加批量轴
+    # 添加批量轴，初始化第一个输出X
     dec_X = torch.unsqueeze(torch.tensor(
         [tgt_vocab['<bos>']], dtype=torch.long, device=device), dim=0)
     output_seq, attention_weight_seq = [], []
     for _ in range(num_steps):
+        # 这里其实是要改的，但直接改上面的Seq2SeqDecoder类了
         Y, dec_state = net.decoder(dec_X, dec_state)
         # 我们使用具有预测最高可能性的词元，作为解码器在下一时间步的输入
         dec_X = Y.argmax(dim=2)
@@ -306,6 +341,8 @@ def predict_seq2seq(net, src_sentence, src_vocab, tgt_vocab, num_steps,
         if save_attention_weights:
             attention_weight_seq.append(net.decoder.attention_weights)
         # 一旦序列结束词元被预测，输出序列的生成就完成了
+        # 训练阶段self.rnn的时间步是num_step
+        # 但预测阶段不需要，预测阶段当output是<eos>的时候直接break即可
         if pred == tgt_vocab['<eos>']:
             break
         output_seq.append(pred)
@@ -317,12 +354,16 @@ def predict_seq2seq(net, src_sentence, src_vocab, tgt_vocab, num_steps,
 
 def bleu(pred_seq, label_seq, k):  #@save
     """计算BLEU"""
+    # 对着算式看吧，k是其中一个评估参数，根据实际情况选择
     pred_tokens, label_tokens = pred_seq.split(' '), label_seq.split(' ')
     len_pred, len_label = len(pred_tokens), len(label_tokens)
     score = math.exp(min(0, 1 - len_label / len_pred))
     for n in range(1, k + 1):
+        # collections.defaultdict(int)：
+        # 和普通的 dict 类似，但在访问不存在的键时不会报错，而是自动创建一个默认值
         num_matches, label_subs = 0, collections.defaultdict(int)
         for i in range(len_label - n + 1):
+            # 如果某个 n-gram 第一次出现，defaultdict 自动给它赋值 0；然后再执行 += 1，变成 1
             label_subs[' '.join(label_tokens[i: i + n])] += 1
         for i in range(len_pred - n + 1):
             if label_subs[' '.join(pred_tokens[i: i + n])] > 0:
