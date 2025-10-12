@@ -49,7 +49,7 @@ attention.eval()
 
 batch_size, num_queries, valid_lens = 2, 4, torch.tensor([3, 2])
 X = torch.ones((batch_size, num_queries, num_hiddens))
-attention(X, X, X, valid_lens).shape
+print(attention(X, X, X, valid_lens).shape)
 
 # ========================
 # 位置编码
@@ -80,3 +80,14 @@ X = pos_encoding(torch.zeros((1, num_steps, encoding_dim)))
 P = pos_encoding.P[:, :X.shape[1], :]
 d2l.plot(torch.arange(num_steps), P[0, :, 6:10].T, xlabel='Row (position)',
          figsize=(6, 2.5), legend=["Col %d" % d for d in torch.arange(6, 10)])
+
+# ========================
+# 绝对位置信息
+# ========================
+
+for i in range(8):
+    print(f'{i}的二进制是：{i:>03b}')
+
+P = P[0, :, :].unsqueeze(0).unsqueeze(0)
+d2l.show_heatmaps(P, xlabel='Column (encoding dimension)',
+                  ylabel='Row (position)', figsize=(3.5, 4), cmap='Blues')
