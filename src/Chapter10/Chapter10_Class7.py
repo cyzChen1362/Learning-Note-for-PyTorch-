@@ -69,27 +69,43 @@ class Seq2SeqAttentionDecoder(AttentionDecoder):
         self.dense = nn.Linear(num_hiddens, vocab_size)
 
     def init_state(self, enc_outputs, enc_valid_lens, *args):
-        # outputs的形状为(batch_size，num_steps，num_hiddens).
+        # outputs的形状为(num_steps,batch_size,num_hiddens)
         # hidden_state的形状为(num_layers，batch_size，num_hiddens)
         # 这里的enc_valid_lens是怎么传进来的？见下文
         outputs, hidden_state = enc_outputs
+        # permute之后的输出是(batch_size,num_steps,num_hiddens)
         return (outputs.permute(1, 0, 2), hidden_state, enc_valid_lens)
 
     def forward(self, X, state):
-        # enc_outputs的形状为(batch_size,num_steps,num_hiddens).
+        # 这里X输入的形状是(batch_size,num_steps)
+        # 当然，在训练中X使用的是标签值，也就是强制教学 （见Y_hat, _ = net(X, dec_input, X_valid_len)）
+        # 一开始承接的state是编码器输出的state
+        # enc_outputs的形状为(batch_size,num_steps,num_hiddens)
         # hidden_state的形状为(num_layers,batch_size,num_hiddens)
         enc_outputs, hidden_state, enc_valid_lens = state
-        # 输出X的形状为(num_steps,batch_size,embed_size)
+        # 输出X的形状为(num_steps,batch_size,embed_size)（permute后）
         X = self.embedding(X).permute(1, 0, 2)
         outputs, self._attention_weights = [], []
+        # for step in num_steps:
         for x in X:
+            # ********************************************************************************
+            # 第一个循环中，query是编码器最后一个输出的最顶层的隐状态
+            # 随后，hidden_state在循环中被更新为这一时间步的最后一个输出的隐状态
+            # 在下一个循环中，query将会是上一个循环的时间步的最后一个输出的最顶层隐状态
+            # 在循环中，enc_outputs始终是编码器对源句子所有时间步的最终层隐状态，并不更新
+            # 也就是说，每个循环的query都会被更新，而key和value是不更新的
+            # 并且由于源句子后面可能有填充部分，所以传入enc_valid_lens作为遮蔽，不学习填充部分
+            # ********************************************************************************
+            # x形状为(batch_size,embed_size)
             # query的形状为(batch_size,1,num_hiddens)
             query = torch.unsqueeze(hidden_state[-1], dim=1)
             # context的形状为(batch_size,1,num_hiddens)
+            # 这里得到的context是由编码器隐状态应用了加性注意力的隐状态
             context = self.attention(
                 query, enc_outputs, enc_outputs, enc_valid_lens)
             # 在特征维度上连结
             x = torch.cat((context, torch.unsqueeze(x, dim=1)), dim=-1)
+            # rnn的state使用上一时间步输出的state，存
             # 将x变形为(1,batch_size,embed_size+num_hiddens)
             out, hidden_state = self.rnn(x.permute(1, 0, 2), hidden_state)
             outputs.append(out)
