@@ -56,20 +56,29 @@ print(attention(X, X, X, valid_lens).shape)
 # ========================
 
 #@save
+# 位置编码
 class PositionalEncoding(nn.Module):
     """位置编码"""
     def __init__(self, num_hiddens, dropout, max_len=1000):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(dropout)
         # 创建一个足够长的P
+        # max_len维即position维即词数；num_hiddens即embedding_size
         self.P = torch.zeros((1, max_len, num_hiddens))
+        # 分子生成max_len行1列，分母生成1行num_hiddens/2列，然后广播
         X = torch.arange(max_len, dtype=torch.float32).reshape(
             -1, 1) / torch.pow(10000, torch.arange(
             0, num_hiddens, 2, dtype=torch.float32) / num_hiddens)
+        # 从第 0 个维度开始，每隔两个取一个 → 偶数维
+        # 从第 1 个维度开始，每隔两个取一个 → 奇数维
         self.P[:, :, 0::2] = torch.sin(X)
         self.P[:, :, 1::2] = torch.cos(X)
 
     def forward(self, X):
+        # X.shape = (batch_size, seq_len, num_hiddens)
+        # self.P.shape = (1, max_len, num_hiddens)
+        # self.P[:, :X.shape[1], :]的形状是 (1, seq_len, num_hiddens)
+        # 因为 self.P 是按 max_len 预生成的，输入句子可能短一些，所以要切片
         X = X + self.P[:, :X.shape[1], :].to(X.device)
         return self.dropout(X)
 
