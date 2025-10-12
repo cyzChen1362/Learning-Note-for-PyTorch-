@@ -2972,7 +2972,6 @@ class AdditiveAttention(nn.Module):
 # 所以是一一对应的
 # ********************************************************************************
 
-#@save
 # 缩放点积注意力
 class DotProductAttention(nn.Module):
     """缩放点积注意力"""
@@ -2991,6 +2990,18 @@ class DotProductAttention(nn.Module):
         # self.attention_weights的形状：(batch_size，num_queries，num_keys)
         self.attention_weights = masked_softmax(scores, valid_lens)
         return torch.bmm(self.dropout(self.attention_weights), values)
+
+# ############################# 10.7 ##########################
+
+# 定义注意力解码器
+class AttentionDecoder(Decoder):
+    """带有注意力机制解码器的基本接口"""
+    def __init__(self, **kwargs):
+        super(AttentionDecoder, self).__init__(**kwargs)
+
+    @property
+    def attention_weights(self):
+        raise NotImplementedError
 
 # ############################# 10.7(old) ##########################
 # def read_imdb(folder='train', data_root="/S1/CSCL/tangss/Datasets/aclImdb"):
@@ -3049,4 +3060,90 @@ class DotProductAttention(nn.Module):
 #     label = torch.argmax(net(sentence.view((1, -1))), dim=1)
 #     return 'positive' if label.item() == 1 else 'negative'
 
+# ############################# 10.8 ##########################
 
+
+
+# ############################# 10.9 ##########################
+
+#@save
+# 为了多注意力头的并行计算而变换形状
+def transpose_qkv(X, num_heads):
+    """为了多注意力头的并行计算而变换形状"""
+    # 输入X的形状:(batch_size，查询或者“键－值”对的个数，num_hiddens)
+    # 经过reshape后:(batch_size，查询或者“键－值”对的个数，num_heads，num_hiddens/num_heads)
+    X = X.reshape(X.shape[0], X.shape[1], num_heads, -1)
+
+    # 经过permute后:(batch_size，num_heads，查询或者“键－值”对的个数,num_hiddens/num_heads)
+    X = X.permute(0, 2, 1, 3)
+
+    # 最终输出:(batch_size*num_heads,查询或者“键－值”对的个数,num_hiddens/num_heads)
+    return X.reshape(-1, X.shape[2], X.shape[3])
+
+#@save
+# 逆转transpose_qkv函数的操作
+def transpose_output(X, num_heads):
+    """逆转transpose_qkv函数的操作"""
+    X = X.reshape(-1, num_heads, X.shape[1], X.shape[2])
+    X = X.permute(0, 2, 1, 3)
+    return X.reshape(X.shape[0], X.shape[1], -1)
+
+#@save
+# 多头注意力
+class MultiHeadAttention(nn.Module):
+    """多头注意力"""
+    # 这里小改了一下教材，最终的输出可以指定，不一定是num_hiddens这么多（当然默认是）
+    # 然后增加了个注意力权重的输出
+    def __init__(self, key_size, query_size, value_size, num_hiddens,
+                 num_heads, dropout, num_outputs = None, bias=False, **kwargs):
+        super(MultiHeadAttention, self).__init__(**kwargs)
+        self.num_heads = num_heads
+        self.attention = d2l.DotProductAttention(dropout)
+        self.W_q = nn.Linear(query_size, num_hiddens, bias=bias)
+        self.W_k = nn.Linear(key_size, num_hiddens, bias=bias)
+        self.W_v = nn.Linear(value_size, num_hiddens, bias=bias)
+        if num_outputs is not None:
+            self.W_o = nn.Linear(num_hiddens, num_outputs, bias=bias)
+        else:
+            self.W_o = nn.Linear(num_hiddens, num_hiddens, bias=bias)
+
+    def forward(self, queries, keys, values, valid_lens):
+        # queries，keys，values的形状:
+        # (batch_size，查询或者“键－值”对的个数，query_size or keys_size or values_size)
+        # valid_lens的形状:
+        # (batch_size，)或(batch_size，查询的个数)
+        # 经过变换后，输出的queries，keys，values的形状:
+        # (batch_size*num_heads，查询或者“键－值”对的个数，num_hiddens/num_heads)
+        # ********************************************************************************
+        # 这里这样干，主要是因为想要用一个全连接层直接训练多个头的Q\K\V
+        # 所以这里输出的num_hiddens其实是hiddens_for_each_head*num_heads
+        # 然后，算注意力的时候，每个batch之间不能互相干扰，多个头之间每个头也不能互相干扰
+        # 所以直接把num_heads维塞入batch_sizes维
+        # 将(batch_size,查询或者“键－值”对的个数,hiddens_for_each_head*num_heads)
+        # 变成(batch_size*num_heads,查询或者“键－值”对的个数,hiddens_for_each_head)
+        # 之后放入self.attention时，d2l.DotProductAttention计算中batch_size维是不会相互干扰的
+        # torch.bmm只作用于同一batch的(num_queries，d)@(d,num_keys)，不会跨batch相乘
+        # 也就是把heads放入batch维度，同样有不会跨heads相乘的效果
+        # 最后逆过程把heads从batch维还原出来即可
+        # 同时复制valid_lens以适应batch_size*num_heads的形状，在attention中mask
+        # ********************************************************************************
+        queries = transpose_qkv(self.W_q(queries), self.num_heads)
+        keys = transpose_qkv(self.W_k(keys), self.num_heads)
+        values = transpose_qkv(self.W_v(values), self.num_heads)
+
+        if valid_lens is not None:
+            # 在轴0，将第一项（标量或者矢量）复制num_heads次，
+            # 然后如此复制第二项，然后诸如此类。
+            valid_lens = torch.repeat_interleave(
+                valid_lens, repeats=self.num_heads, dim=0)
+
+        # output的形状:(batch_size*num_heads，查询的个数，num_hiddens/num_heads)
+        output = self.attention(queries, keys, values, valid_lens)
+
+        # 注意力权重
+        self.attention_weights = transpose_output(self.attention.attention_weights, self.num_heads)
+
+        # output_concat的形状:(batch_size，查询的个数，num_hiddens)
+        output_concat = transpose_output(output, self.num_heads)
+        # 最终输出：(batch_size，查询的个数，num_outputs)
+        return self.W_o(output_concat)
