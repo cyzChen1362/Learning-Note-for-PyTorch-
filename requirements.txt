@@ -12,6 +12,7 @@ executing==2.2.0
 filelock @ file:///C:/b/abs_758187j281/croot/filelock_1744281404850/work
 fonttools==4.59.0
 fsspec==2024.6.1
+git-filter-repo==2.47.0
 gmpy2 @ file:///C:/b/abs_d8ki0o0h97/croot/gmpy2_1738085498525/work
 idna @ file:///C:/b/abs_aad84bnnw5/croot/idna_1714398896795/work
 importlib_resources==6.5.2

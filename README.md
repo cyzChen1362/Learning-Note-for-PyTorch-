@@ -36,7 +36,8 @@
   
 - **补充**   
 如果出现Error可以多翻翻**d2lzh_pytorch/utils.py**  
-图片不显示可以勤加d2l.plt.show()，有些方法里面我禁掉了
+图片不显示可以勤加d2l.plt.show()，有些方法里面我禁掉了  
+当然，有些数据集太大所以没有上传GitHub
 ---
 
 ## License & Attribution
@@ -57,8 +58,15 @@ LearningNote_Dive-into-DL-PyTorch/
 │ └─ utils.py  
 │  
 ├─ data/  
+│ ├─ bananas/  
+│ ├─ cifar-10/  
+│ ├─ dog-breed-identification/  
+│ ├─ fra-eng/  
 │ ├─ img/  
 │ ├─ Kaggle_House/  
+│ ├─ pretrainedmodels/  
+│ ├─ S1/  
+│ ├─ VOC2012/  
 │ ├─ airfoil_self_noise.dat  
 │ ├─ house_tiny.csv  
 │ └─ jaychou_lyrics.txt.zip  
