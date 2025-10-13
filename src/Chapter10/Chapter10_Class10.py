@@ -31,6 +31,21 @@ r"""
 # b站：https://www.bilibili.com/video/BV1Kq4y1H7FL/?spm_id_from=333.1387.collection.video_card.click&vd_source=8086d55c4f00a2130d3e31cecb0db076
 # ********************************************************************************
 
+# ********************************************************************************
+# 原书代码有误：
+# Transformer的DecoderBlock的attention模块是以上一时间步的预测词作为query，
+# 以之前所有时间步的预测词作为key和value；
+# 同时在DecoderBlock之前要对之前所有步的预测词作位置编码；
+# 但源代码的预测的输入只是上一时间步的预测词，所以位置编码肯定出错；
+#
+# 正常人的想法大概是，先将上一时间步和之前时间步拼起来，
+# 位置编码后再拆开进入DecoderBlock的attention；
+# 但GPT给出的答案是：
+# 直接改位置编码，加个offset即可
+# 我再Chapter10_Class10_Update中进行了修改
+# 这个.py就不改了，保留源码
+# ********************************************************************************
+
 import math
 import pandas as pd
 import torch
