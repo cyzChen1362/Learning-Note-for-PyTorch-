@@ -2640,6 +2640,7 @@ def sequence_mask(X, valid_len, value=0):
     mask = torch.arange((maxlen), dtype=torch.float32,
                         device=X.device)[None, :] < valid_len[:, None]
     # ~mask 表示逻辑取反，即无效位置
+    # 这里是沿着第二个维度去mask的
     X[~mask] = value
     return X
 
@@ -3120,7 +3121,7 @@ class MultiHeadAttention(nn.Module):
     # 这里小改了一下教材，最终的输出可以指定，不一定是num_hiddens这么多（当然默认是）
     # 然后增加了个注意力权重的输出
     def __init__(self, key_size, query_size, value_size, num_hiddens,
-                 num_heads, dropout, num_outputs = None, bias=False, **kwargs):
+                 num_heads, dropout, bias=False, num_outputs = None, **kwargs):
         super(MultiHeadAttention, self).__init__(**kwargs)
         self.num_heads = num_heads
         self.attention = DotProductAttention(dropout)
