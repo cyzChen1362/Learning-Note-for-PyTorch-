@@ -3090,6 +3090,24 @@ class PositionalEncoding(nn.Module):
         X = X + self.P[:, :X.shape[1], :].to(X.device)
         return self.dropout(X)
 
+# 位置编码带offset
+class PositionalEncodingOffset(nn.Module):
+    def __init__(self, num_hiddens, dropout, max_len=1000):
+        super().__init__()
+        self.dropout = nn.Dropout(dropout)
+        # 预生成 [1, max_len, d_model] 的位置编码矩阵 self.P
+        P = torch.zeros((1, max_len, num_hiddens))
+        X = torch.arange(max_len, dtype=torch.float32).reshape(-1, 1) / \
+            torch.pow(10000, torch.arange(0, num_hiddens, 2, dtype=torch.float32) / num_hiddens)
+        P[:, :, 0::2] = torch.sin(X)
+        P[:, :, 1::2] = torch.cos(X)
+        self.register_buffer('P', P)  # 不参与梯度
+    def forward(self, X, offset: int = 0):
+        # X: [B, T, D]; 取 P 的切片 [offset:offset+T]
+        X = X + self.P[:, offset: offset + X.shape[1], :]
+        return self.dropout(X)
+
+
 # ############################# 10.9 ##########################
 
 #@save
