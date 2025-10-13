@@ -373,33 +373,57 @@ def load_data_jay_lyrics():
 
 def data_iter_random(corpus_indices, batch_size, num_steps, device=None):
     # 减1是因为输出的索引x是相应输入的索引y加1
+    # num_examples是总输出样本数
+    # 输出在输入之后的一个开始输出，所以当然是总输出样本数比总样本数少一个
     num_examples = (len(corpus_indices) - 1) // num_steps
+    # it is clear that
     epoch_size = num_examples // batch_size
+    # 每一条的索引并打乱
+    # 这里存放的只是“第几个样本”，而不是样本在原始序列里的字符下标
     example_indices = list(range(num_examples))
     random.shuffle(example_indices)
 
     # 返回从pos开始的长为num_steps的序列
     def _data(pos):
+        # corpus_indices存储的是顺序字符的索引
         return corpus_indices[pos: pos + num_steps]
+
     if device is None:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
     for i in range(epoch_size):
         # 每次读取batch_size个随机样本
+        # 也就是读多少条做并行
         i = i * batch_size
+        # example_indices 这里存放的只是“第几个样本”，而不是样本在原始序列里的字符下标
+        # 所以j自然要乘以num_steps，这样才能对应上_data里的原始字符索引列表corpus_indices
+        # 按条来抽取
+        # batch_indices告诉你要从第几条抽到第几条
         batch_indices = example_indices[i: i + batch_size]
+        # 遍历抽每条，for写到lambda里面了
+        # X是输入数据条，Y是输出数据条
         X = [_data(j * num_steps) for j in batch_indices]
         Y = [_data(j * num_steps + 1) for j in batch_indices]
         yield torch.tensor(X, dtype=torch.float32, device=device), torch.tensor(Y, dtype=torch.float32, device=device)
 
 def data_iter_consecutive(corpus_indices, batch_size, num_steps, device=None):
     if device is None:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    # corpus_indices存储的是顺序字符的索引
     corpus_indices = torch.tensor(corpus_indices, dtype=torch.float32, device=device)
+    # 把总长度 data_len 均分成 batch_size 条连续的长序列
+    # 每条长序列的长度是 batch_len
     data_len = len(corpus_indices)
     batch_len = data_len // batch_size
+    # 截取能整除的部分，然后reshape成[batch_size, batch_len]
+    # 每一行都是一条连续的长序列
+    # 相邻两行的末尾和开头虽然在原始序列上是相邻的字符，但在这个实现里不会跨行传递隐藏状态
     indices = corpus_indices[0: batch_size*batch_len].view(batch_size, batch_len)
     epoch_size = (batch_len - 1) // num_steps
+    # 只是在每一行内部按列切片
+    # RNN 前向时通常会把每一行当作一个独立样本
+    # 在这行内部的时间步是连续的，但行与行之间完全不共享隐藏状态
+    # 也就是并行计算，效率提升但跨行依赖减少
     for i in range(epoch_size):
         i = i * num_steps
         X = indices[:, i: i + num_steps]
@@ -716,15 +740,24 @@ class Benchmark():
 
 
 # ########################### 9.1 ########################################
+# 绘图函数
+# 作用是把很多张独立的图片按照网格排版到同一张画布上
+# 本函数已保存在d2lzh_pytorch包中方便以后使用
+# scale 是用来控制整张图的放大倍数的参数
 def show_images(imgs, num_rows, num_cols, scale=2):
+    # 这个figsize的作用是指定整张画布（Figure）的大小
     figsize = (num_cols * scale, num_rows * scale)
+    # axes[i][j]：对应第 i 行第 j 列的那一块子图区域
     _, axes = plt.subplots(num_rows, num_cols, figsize=figsize)
     for i in range(num_rows):
         for j in range(num_cols):
+            # 对于每一行，都有num_cols列
+            # 那么第1行的第2个自然是imgs中的第“1*num_cols + 2”个
             axes[i][j].imshow(imgs[i * num_cols + j])
+            # 把每个子图的坐标轴刻度和坐标线都隐藏掉，让图片看起来更干净
             axes[i][j].axes.get_xaxis().set_visible(False)
             axes[i][j].axes.get_yaxis().set_visible(False)
-    # plt.show()
+    plt.show()
     return axes
 
 def train(train_iter, test_iter, net, loss, optimizer, device, num_epochs):
@@ -764,40 +797,88 @@ def bbox_to_rect(bbox, color):
 
 
 ############################ 9.4 ###########################
+# 锚框生成函数
+# 本函数已保存在d2lzh_pytorch包中方便以后使用
 def MultiBoxPrior(feature_map, sizes=[0.75, 0.5, 0.25], ratios=[1, 2, 0.5]):
-    """
+    r"""
     # 按照「9.4.1. 生成多个锚框」所讲的实现, anchor表示成(xmin, ymin, xmax, ymax).
     https://zh.d2l.ai/chapter_computer-vision/anchor.html
     Args:
         feature_map: torch tensor, Shape: [N, C, H, W].
-        sizes: List of sizes (0~1) of generated MultiBoxPriores. 
-        ratios: List of aspect ratios (non-negative) of generated MultiBoxPriores. 
+        sizes: List of sizes (0~1) of generated MultiBoxPriores.
+        ratios: List of aspect ratios (non-negative) of generated MultiBoxPriores.
     Returns:
         anchors of shape (1, num_anchors, 4). 由于batch里每个都一样, 所以第一维为1
     """
     pairs = [] # pair of (size, sqrt(ration))
+    # 只对包含s1或r1的大小与宽高比的组合感兴趣
     for r in ratios:
         pairs.append([sizes[0], math.sqrt(r)])
     for s in sizes[1:]:
         pairs.append([s, math.sqrt(ratios[0])])
-    
+
+    # 将嵌套列表转为NumPy array，才有“所有行的第一列”
+    # 总长度为n+m-1
     pairs = np.array(pairs)
-    
+
+    # 宽系数
     ss1 = pairs[:, 0] * pairs[:, 1] # size * sqrt(ration)
+    # 高系数
     ss2 = pairs[:, 0] / pairs[:, 1] # size / sqrt(ration)
-    
+
+    # 生成形如 [xmin, ymin, xmax, ymax] 的二维数组，n+m-1行，4列
+    # 这些坐标是相对于中心点的半宽半高，宽系数 0.5 → 左右坐标 ±0.25
     base_anchors = np.stack([-ss1, -ss2, ss1, ss2], axis=1) / 2
-    
+
+    # 取出倒数两个维度的大小
     h, w = feature_map.shape[-2:]
+    # 横向锚框中心点坐标(归一化到0~1)
     shifts_x = np.arange(0, w) / w
+    # 纵向锚框中心点坐标(归一化到0~1)
     shifts_y = np.arange(0, h) / h
+
+    # shift_x：每一行都复制 shifts_x，表示每个网格点的横坐标
+    # [[0, 1/w, 2/w, ...],
+    #  [0, 1/w, 2/w, ...],
+    #  ...
+    # ]
+    # shift_y：每一列都复制 shifts_y，表示每个网格点的纵坐标
+    # [[0, 0, 0, ...],
+    #  [1/h, 1/h, 1/h, ...],
+    #  ...
+    # ]
     shift_x, shift_y = np.meshgrid(shifts_x, shifts_y)
+
+    # 拉平成一维
     shift_x = shift_x.reshape(-1)
     shift_y = shift_y.reshape(-1)
+    # 把 (x, y) 复制成 [x, y, x, y]
+    # → 行
+    # ↓ 列  [[0  , 1/w, 2/w, ... , 0  , 1/w, 2/w, ...],
+    #        [0  , 0  , 0  , ... , 1/h, 1/h, 1/h, ...],
+    #        [0  , 1/w, 2/w, ... , 0  , 1/w, 2/w, ...],
+    #        [0  , 0  , 0  , ... , 1/h, 1/h, 1/h, ...],
+    #       ]
     shifts = np.stack((shift_x, shift_y, shift_x, shift_y), axis=1)
-    
+
+    # shifts.reshape：行数仍然是h*w，第三维仍然是4，新增了1个第二维
+    # 也就是shifts.reshape是(h*w,1,4)，base_anchors.reshape是(1,n+m-1,4)
+    # 就能广播机制了
+    # 生成的anchors是(h*w,n+m-1,4)
+    # anchors的每一行都对应着同一个中心坐标，
+    # 这一行的每一列都代表着一种不同的锚框大小，
+    # 第三维4个通道说明每个中心坐标的每种锚框都由四个坐标点构成
+    # 当然以上全是归一化的形式
+    # 以及，这里当然是加法而不是惩罚（没错，就是在你认为的广播机制条件下）
+    # 因为shifts的某一行是一个特征图上某个像素位置对应到原图的归一化中心点坐标 [cx, cy, cx, cy]
+    # base_anchors的每一行则是某个归一化中心点的归一化偏移量
+    # 总偏移后坐标 = （宽or高） * （归一化中心点 + 归一化偏移量）
+    # 或者更形象来说，这里计算的偏移量是s√r和s/√r，而总偏移量是ws√r和hs/√r
+    # 刚好总中心点是wcx和hcy，这里的shifts和base_anchors都提取出来了w和h项
     anchors = shifts.reshape((-1, 1, 4)) + base_anchors.reshape((1, -1, 4))
-    
+
+    # 最后的输出坐标也是归一化的
+    # 第二维的0~n+m-2是同一中心点坐标不同锚框，以此类推
     return torch.tensor(anchors, dtype=torch.float32).view(1, -1, 4)
 
 # 这里我直接把MultiBoxPrior换成新的GPU版
@@ -3191,3 +3272,207 @@ class MultiHeadAttention(nn.Module):
         output_concat = transpose_output(output, self.num_heads)
         # 最终输出：(batch_size，查询的个数，num_outputs)
         return self.W_o(output_concat)
+
+# ############################# 10.10 ##########################
+
+# 基于位置的前馈网络
+class PositionWiseFFN(nn.Module):
+    """基于位置的前馈网络"""
+    # 输入: (batch_size, num_steps, ffn_num_input)
+    # 输出: (batch_size, num_steps, ffn_num_outputs)
+    # 其实就是一个两层的感知机
+    def __init__(self, ffn_num_input, ffn_num_hiddens, ffn_num_outputs,
+                 **kwargs):
+        super(PositionWiseFFN, self).__init__(**kwargs)
+        self.dense1 = nn.Linear(ffn_num_input, ffn_num_hiddens)
+        self.relu = nn.ReLU()
+        self.dense2 = nn.Linear(ffn_num_hiddens, ffn_num_outputs)
+
+    def forward(self, X):
+        return self.dense2(self.relu(self.dense1(X)))
+
+# 残差连接后进行层规范化
+class AddNorm(nn.Module):
+    """残差连接后进行层规范化"""
+    # 这里进行了一些修改
+    # 主要防止经过FFN后Y最后一维和X不匹配的问题
+    def __init__(self, normalized_shape, dropout, **kwargs):
+        super(AddNorm, self).__init__(**kwargs)
+        self.dropout = nn.Dropout(dropout)
+        self.ln = nn.LayerNorm(normalized_shape)
+        self._proj_y2x = None
+
+    def _ensure_proj(self, in_dim, out_dim, device, dtype):
+        # 若还没建或维度变了，就重建一次
+        if (self._proj_y2x is None or
+            self._proj_y2x.in_features != in_dim or
+            self._proj_y2x.out_features != out_dim):
+            self._proj_y2x = nn.Linear(in_dim, out_dim).to(device=device, dtype=dtype)
+
+    def forward(self, X, Y):
+        if X.size(-1) != Y.size(-1):
+            self._ensure_proj(Y.size(-1), X.size(-1), X.device, X.dtype)
+            Y = self._proj_y2x(Y)
+        return self.ln(self.dropout(Y) + X)
+
+# Transformer编码器块
+class EncoderBlock(nn.Module):
+    """Transformer编码器块"""
+    def __init__(self, key_size, query_size, value_size, num_hiddens,
+                 norm_shape, ffn_num_input, ffn_num_hiddens, num_heads,
+                 dropout, use_bias=False, **kwargs):
+        super(EncoderBlock, self).__init__(**kwargs)
+        self.attention = MultiHeadAttention(
+            key_size, query_size, value_size, num_hiddens, num_heads, dropout,
+            use_bias)
+        self.addnorm1 = AddNorm(norm_shape, dropout)
+        self.ffn = PositionWiseFFN(
+            ffn_num_input, ffn_num_hiddens, num_hiddens)
+        self.addnorm2 = AddNorm(norm_shape, dropout)
+
+    def forward(self, X, valid_lens):
+        # valid_lens：有效词，遮蔽填充
+        Y = self.addnorm1(X, self.attention(X, X, X, valid_lens))
+        return self.addnorm2(Y, self.ffn(Y))
+
+# Transformer编码器
+class TransformerEncoder(Encoder):
+    """Transformer编码器"""
+    def __init__(self, vocab_size, key_size, query_size, value_size,
+                 num_hiddens, norm_shape, ffn_num_input, ffn_num_hiddens,
+                 num_heads, num_layers, dropout, use_bias=False, **kwargs):
+        super(TransformerEncoder, self).__init__(**kwargs)
+        self.num_hiddens = num_hiddens
+        self.embedding = nn.Embedding(vocab_size, num_hiddens)
+        self.pos_encoding = PositionalEncoding(num_hiddens, dropout)
+        self.blks = nn.Sequential()
+        for i in range(num_layers):
+            self.blks.add_module("block"+str(i),
+                EncoderBlock(key_size, query_size, value_size, num_hiddens,
+                             norm_shape, ffn_num_input, ffn_num_hiddens,
+                             num_heads, dropout, use_bias))
+
+    def forward(self, X, valid_lens, *args):
+        # 因为位置编码值在-1和1之间，
+        # 因此嵌入值乘以嵌入维度的平方根进行缩放，有助于让两者量级相近、训练更稳
+        # 然后再与位置编码相加。
+        X = self.pos_encoding(self.embedding(X) * math.sqrt(self.num_hiddens))
+        self.attention_weights = [None] * len(self.blks)
+        for i, blk in enumerate(self.blks):
+            X = blk(X, valid_lens)
+            self.attention_weights[
+                i] = blk.attention.attention.attention_weights
+        return X
+
+# 解码器中第i个块
+class DecoderBlock(nn.Module):
+    """解码器中第i个块"""
+    def __init__(self, key_size, query_size, value_size, num_hiddens,
+                 norm_shape, ffn_num_input, ffn_num_hiddens, num_heads,
+                 dropout, i, **kwargs):
+        super(DecoderBlock, self).__init__(**kwargs)
+        self.i = i
+        self.attention1 = MultiHeadAttention(
+            key_size, query_size, value_size, num_hiddens, num_heads, dropout)
+        self.addnorm1 = AddNorm(norm_shape, dropout)
+        self.attention2 = MultiHeadAttention(
+            key_size, query_size, value_size, num_hiddens, num_heads, dropout)
+        self.addnorm2 = AddNorm(norm_shape, dropout)
+        self.ffn = PositionWiseFFN(ffn_num_input, ffn_num_hiddens,
+                                   num_hiddens)
+        self.addnorm3 = AddNorm(norm_shape, dropout)
+
+    def forward(self, X, state):
+        enc_outputs, enc_valid_lens = state[0], state[1]
+        # X: [batch_size, num_steps, num_hiddens]
+        # state = [enc_outputs, enc_valid_lens, cache]
+        # 编码器输出 enc_outputs: [batch_size, enc_seq_len, num_hiddens]
+        # 编码器的有效长度 enc_valid_lens: [batch_size, enc_seq_len]
+        # 每个解码层的缓存 cache:是一个列表，列表每个元素都是[batch_size, num_steps, num_hiddens]
+        # 其中第i个元素（即state[2][i]）是第i个解码块的输出
+
+        # 训练阶段，输出序列的所有词元都在同一时间处理，
+        # 因此state[2][self.i]初始化为None。
+        # 预测阶段，输出序列是通过词元一个接着一个解码的，
+        # 因此state[2][self.i]包含着直到当前时间步第i个块解码的输出表示
+
+        # 这里是因为，预测阶段是一个个词预测的
+        # 如果每次预测都要重新计算这个之前的词的Key和Value将会很慢
+        # 所以这里的操作是缓存之前步的Key和Value
+        # 当然，预测阶段的X的num_step=1
+        if state[2][self.i] is None:
+            key_values = X
+        else:
+            # 沿着num_step拼接
+            key_values = torch.cat((state[2][self.i], X), axis=1)
+        state[2][self.i] = key_values
+
+        if self.training:
+            batch_size, num_steps, _ = X.shape
+            # dec_valid_lens的开头:(batch_size,num_steps),
+            # 其中每一行是[1,2,...,num_steps]，例如第二个元素是2，也就是第一个句子的第二步只应该看到两个词
+            dec_valid_lens = torch.arange(
+                1, num_steps + 1, device=X.device).repeat(batch_size, 1)
+        else:
+            dec_valid_lens = None
+
+        # 这里的dec_valid_lens的形状是十分合理的
+        # 因为在masked_softmax中，dec_valid_lens被拉为长batch_size*num_steps的一维向量
+        # 而X进去之后一通运算，在mask那里会被拉为[batch_size*num_steps, num_keys]
+        # 在训练的时候num_keys就是整个目标句子的长度，对着这个长度mask就对了
+
+        # 自注意力
+        X2 = self.attention1(X, key_values, key_values, dec_valid_lens)
+        Y = self.addnorm1(X, X2)
+        # 编码器－解码器注意力。
+        # enc_outputs的开头:(batch_size,num_steps,num_hiddens)
+        Y2 = self.attention2(Y, enc_outputs, enc_outputs, enc_valid_lens)
+        Z = self.addnorm2(Y, Y2)
+        return self.addnorm3(Z, self.ffn(Z)), state
+
+# Transformer解码器块
+class TransformerDecoder(AttentionDecoder):
+    def __init__(self, vocab_size, key_size, query_size, value_size,
+                 num_hiddens, norm_shape, ffn_num_input, ffn_num_hiddens,
+                 num_heads, num_layers, dropout, **kwargs):
+        super(TransformerDecoder, self).__init__(**kwargs)
+        self.num_hiddens = num_hiddens
+        self.num_layers = num_layers
+        self.embedding = nn.Embedding(vocab_size, num_hiddens)
+        self.pos_encoding = PositionalEncodingOffset(num_hiddens, dropout)
+        self.blks = nn.Sequential()
+        for i in range(num_layers):
+            self.blks.add_module("block"+str(i),
+                DecoderBlock(key_size, query_size, value_size, num_hiddens,
+                             norm_shape, ffn_num_input, ffn_num_hiddens,
+                             num_heads, dropout, i))
+        self.dense = nn.Linear(num_hiddens, vocab_size)
+
+    def init_state(self, enc_outputs, enc_valid_lens, *args):
+        return [enc_outputs, enc_valid_lens, [None] * self.num_layers, 0]
+
+    def forward(self, X, state):
+        enc_outputs, enc_valid_lens, cache_list, t = state
+        X = self.embedding(X) * math.sqrt(self.num_hiddens)
+
+        if self.training:
+            X = self.pos_encoding(X, offset=0)
+        else:
+            # 用 offset=t 的位置编码
+            X = self.pos_encoding(X, offset=t)
+
+        # 过各个解码块（内部会把当前步拼到各层自己的 KV cache 上）
+        self._attention_weights = [[None] * len(self.blks) for _ in range(2)]
+        for i, blk in enumerate(self.blks):
+            X, state = blk(X, state)
+            self._attention_weights[0][i] = blk.attention1.attention.attention_weights
+            self._attention_weights[1][i] = blk.attention2.attention.attention_weights
+
+        # 推理时把 t 累加已处理的步数（通常是 1）
+        if not self.training:
+            state[3] = t + X.shape[1]
+        return self.dense(X), state
+
+    @property
+    def attention_weights(self):
+        return self._attention_weights

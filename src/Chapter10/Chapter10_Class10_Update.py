@@ -44,6 +44,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 # ========================
 
 #@save
+# 基于位置的前馈网络
 class PositionWiseFFN(nn.Module):
     """基于位置的前馈网络"""
     # 输入: (batch_size, num_steps, ffn_num_input)
@@ -108,6 +109,7 @@ print(add_norm(torch.ones((2, 3, 4)), torch.ones((2, 3, 4))).shape)
 # ========================
 
 #@save
+# Transformer编码器块
 class EncoderBlock(nn.Module):
     """Transformer编码器块"""
     def __init__(self, key_size, query_size, value_size, num_hiddens,
@@ -134,6 +136,7 @@ encoder_blk.eval()
 print(encoder_blk(X, valid_lens).shape)
 
 #@save
+# Transformer编码器
 class TransformerEncoder(d2l.Encoder):
     """Transformer编码器"""
     def __init__(self, vocab_size, key_size, query_size, value_size,
@@ -171,6 +174,7 @@ print(encoder(torch.ones((2, 100), dtype=torch.long), valid_lens).shape)
 # 解码器
 # ========================
 
+# 解码器中第i个块
 class DecoderBlock(nn.Module):
     """解码器中第i个块"""
     def __init__(self, key_size, query_size, value_size, num_hiddens,
@@ -242,6 +246,7 @@ X = torch.ones((2, 100, 24))
 state = [encoder_blk(X, valid_lens), valid_lens, [None]]
 print(decoder_blk(X, state)[0].shape)
 
+# Transformer解码器块
 class TransformerDecoder(d2l.AttentionDecoder):
     def __init__(self, vocab_size, key_size, query_size, value_size,
                  num_hiddens, norm_shape, ffn_num_input, ffn_num_hiddens,
