@@ -284,9 +284,17 @@ class TransformerDecoder(d2l.AttentionDecoder):
             self._attention_weights[0][i] = blk.attention1.attention.attention_weights
             self._attention_weights[1][i] = blk.attention2.attention.attention_weights
 
-        # 推理时把 t 累加已处理的步数（通常是 1）
+        # 推理时把t累加已处理的步数
         if not self.training:
             state[3] = t + X.shape[1]
+
+        # 这里虽然返回的输出值是dense(X)也就是词向量
+        # 但预测时下一时间步的forward是输入其实是整型的token，而不是词向量
+        # nn.embedding接受的也是token而不是词向量
+        # predict_seq2seq:
+        #     for _ in range(num_steps):
+        #         Y, dec_state = net.decoder(dec_X, dec_state)
+        #         dec_X = Y.argmax(dim=2)
         return self.dense(X), state
 
     @property
